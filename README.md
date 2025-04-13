@@ -36,3 +36,4 @@ This repository is updated periodically. If you have suggestions for additional 
 ## 4. Important links
 
 * [Reverse diffusions, Score & Tweedie](https://alexxthiery.github.io/notes/reverse_and_tweedie/reverse_and_tweedie.html)
+* [CS492(D) Diffusion Models and Their Applications (KAIST, Fall 2024)](https://mhsung.github.io/kaist-cs492d-fall-2024/)
