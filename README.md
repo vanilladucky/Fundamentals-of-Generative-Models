@@ -19,6 +19,7 @@ This repository is updated periodically. If you have suggestions for additional 
   - [1.1. Stochastic Interpolants](#11-stochastic-interpolants)
 - [2. Fundamental papers](#2-fundamental-papers)
 - [3. Recent papers](#3-recent-papers)
+- [4. Important links](#4-important-links)
 
 ## 1. Foundational Theory 
 ### 1.1 Stochastic Interpolants
@@ -31,3 +32,7 @@ This repository is updated periodically. If you have suggestions for additional 
 * [Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2006.11239) (19 June 2020)
 
 ## 3. Recent papers
+
+## 4. Important links
+
+* [Reverse diffusions, Score & Tweedie](https://alexxthiery.github.io/notes/reverse_and_tweedie/reverse_and_tweedie.html)
