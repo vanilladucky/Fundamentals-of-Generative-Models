@@ -1,6 +1,6 @@
 # Fundamentals of Generative models
 
-![Image](figures/image.png)
+![Image created by ChatGPT](figures/image.png)
 *This repository presents literature for generative models, with fundamentals tied to mathematics. Furthermore, implementation of essential papers are presented too*
 
 ## Overview
