@@ -22,6 +22,11 @@ This repository is updated periodically. If you have suggestions for additional 
 ## 1. Foundational Theory 
 ### 1.1 Stochastic Interpolants
 
+* [Stochastic Interpolants: A Unifying Framework for Flows and Diffusions](https://arxiv.org/abs/2303.08797) (15 March 2023)
+
 ## 2. Fundamental papers
+
+* [Denoising Diffusion Implicit Model](https://arxiv.org/abs/2010.02502) (6 Oct 2020)
+* [Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2006.11239) (19 June 2020)
 
 ## 3. Recent papers
