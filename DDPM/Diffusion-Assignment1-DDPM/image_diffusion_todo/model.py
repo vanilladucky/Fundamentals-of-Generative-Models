@@ -27,15 +27,20 @@ class DiffusionModule(nn.Module):
         # DO NOT change the code outside this part.
         # compute noise matching loss.
         B = x0.shape[0]
-        t = self.var_scheduler.uniform_sample_t(B, self.device)        
-        noise = torch.randn_like(x0)
-        xt = self.q_sample(x0, t)
-        alphascum = extract(self.var_scheduler.alphas_cumprod, t, xt)
-        theta = self.network((alphascum.sqrt()*x0+(1-alphascum).sqrt()*noise), t)
-        res = torch.nn.functional.mse_loss(theta, noise)      
 
-        loss = res
-        ######################
+        t = self.var_scheduler.uniform_sample_t(B, self.device)
+
+        eps = noise if noise is not None else torch.randn_like(x0)
+ 
+        x_t, eps = self.var_scheduler.add_noise(x0, t, eps)
+
+        if class_label is not None:
+            eps_theta = self.network(x_t, timestep=t.to(self.device), class_label=class_label)
+        else:
+            eps_theta = self.network(x_t, timestep=t.to(self.device))
+
+        loss = F.mse_loss(eps_theta, eps)
+
         return loss
     
     @property
