@@ -4,15 +4,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-def extract(input, t: torch.Tensor, x: torch.Tensor):
-    if t.ndim == 0:
-        t = t.unsqueeze(0)
-    shape = x.shape
-    t = t.long().to(input.device)
-    out = torch.gather(input, 0, t)
-    reshape = [t.shape[0]] + [1] * (len(shape) - 1)
-    return out.reshape(*reshape)
-
 class BaseScheduler(nn.Module):
     def __init__(
         self, num_train_timesteps: int, beta_1: float, beta_T: float, mode="linear"
@@ -94,17 +85,26 @@ class DDPMScheduler(BaseScheduler):
         ######## TODO ########
         # DO NOT change the code outside this part.
         # Assignment 1. Implement the DDPM reverse step.
-        if isinstance(t, int):
-            t = torch.tensor([t]).to(self.device)
-        eps_factor = (1 - extract(self.var_scheduler.alphas, t, x_t)) / (
-            1 - extract(self.var_scheduler.alphas_cumprod, t, x_t)
-        ).sqrt()
 
-        beta_t_sqrt = (1-extract(self.var_scheduler.alphas, t, x_t)).sqrt()
-        alpha_t_sqrt = (extract(self.var_scheduler.alphas, t, x_t)).sqrt()
-        noise = torch.randn_like(x_t) if t.item() > 0 else 0.0
+        batch_size = x_t.shape[0]
+        t_tensor = torch.full((batch_size,), t, dtype=torch.long, device=x_t.device)
 
-        x_t_prev = (1/alpha_t_sqrt) * (x_t-(eps_factor)*eps_theta) + beta_t_sqrt * noise
+        # grab α_t, \barα_t, and σ_t for this timestep
+        alpha_t = self._get_teeth(self.alphas, t_tensor)            # [B,1,1,1]
+        alpha_cum_t = self._get_teeth(self.alphas_cumprod, t_tensor)
+        sigma_t = self._get_teeth(self.sigmas, t_tensor)
+
+        # 1) predict x₀
+        x0_pred = (x_t - (1 - alpha_cum_t).sqrt() * eps_theta) \
+                  / alpha_cum_t.sqrt()
+
+        # 2) posterior mean μ = √α_t · x₀_pred + √(1−α_t) · ε_θ
+        mean = alpha_t.sqrt() * x0_pred + (1 - alpha_t).sqrt() * eps_theta
+
+        # 3) add noise (no noise at t=0)
+        noise = torch.randn_like(x_t) if t > 0 else torch.zeros_like(x_t)
+        x_t_prev = mean + sigma_t * noise
+
         #######################
         
         return x_t_prev
@@ -138,8 +138,12 @@ class DDPMScheduler(BaseScheduler):
         ######## TODO ########
         # DO NOT change the code outside this part.
         # Assignment 1. Implement the DDPM forward step.
-        alphas_prod_t = extract(self.var_scheduler.alphas_cumprod, t, x_0)
-        x_t = np.sqrt(alphas_prod_t) * x_0 + np.sqrt(1-alphas_prod_t)*eps
+        t = t.to(x_0.device)
+        sqrt_acp = self._get_teeth(self.alphas_cumprod, t).sqrt()
+        sqrt_1macp = (1 - self._get_teeth(self.alphas_cumprod, t)).sqrt()
+
+        # forward diffusion: x_t = √\barα_t · x₀ + √(1−\barα_t) · ε
+        x_t = sqrt_acp * x_0 + sqrt_1macp * eps
         #######################
 
         return x_t, eps
