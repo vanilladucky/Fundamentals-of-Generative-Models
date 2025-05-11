@@ -8,6 +8,11 @@ import math
 # -----------------------------------------------------
 # Beta schedule and precomputed constants
 # -----------------------------------------------------
+def extract(a, t, x_shape): # Helper function to extract out batch sizes and format shape 
+    b, *_ = t.shape
+    out = a.gather(-1, t)
+    return out.reshape(b, *((1,) * (len(x_shape) - 1)))
+
 def linear_beta_schedule(timesteps, beta_start=1e-4, beta_end=0.02):
     return torch.linspace(beta_start, beta_end, timesteps)
 
@@ -71,7 +76,8 @@ class DiffusionScheduler:
             noise = torch.randn_like(x_start)
         sqrt_acp = self.register_buffer['sqrt_alphas_cumprod'][t]
         sqrt_om = self.register_buffer['sqrt_one_minus_alphas_cumprod'][t]
-        print(sqrt_acp.shape, sqrt_om.shape, x_start.shape, noise.shape)
+        sqrt_acp = extract(self.sqrt_alphas_cumprod, t, x_start.shape)
+        sqrt_om = extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)
         return sqrt_acp * x_start + sqrt_om * noise
 
 # -----------------------------------------------------
