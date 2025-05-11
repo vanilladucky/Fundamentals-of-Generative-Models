@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+from torchvision.utils import save_image
 import math
 
 # -----------------------------------------------------
@@ -175,7 +176,7 @@ def p_losses(model, scheduler, x_start, t):
     return F.mse_loss(pred, noise)
 
 
-def train():
+def train(e):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
         transforms.Resize(32),
@@ -190,7 +191,7 @@ def train():
     scheduler = DiffusionScheduler(timesteps=1000, device=device).to(device)
     optim = torch.optim.Adam(model.parameters(), lr=2e-4)
 
-    for epoch in range(50):
+    for epoch in range(e):
         for step, (x, _) in enumerate(loader):
             x = x.to(device)
             t = torch.randint(0, scheduler.timesteps, (x.size(0),), device=device)
@@ -219,5 +220,26 @@ def sample(model, scheduler, shape=(16,3,32,32)):
             x = mean
     return x
 
+def sample_and_save(output_path='sample.png',
+                    model_ckpt='ddpm_epoch_49.pth',  
+                    device='cuda' if torch.cuda.is_available() else 'cpu'):
+
+    model = UNet().to(device)
+    model.load_state_dict(torch.load(model_ckpt, map_location=device))
+    model.eval()
+
+    scheduler = DiffusionScheduler(timesteps=1000, device=device).to(device)
+
+    with torch.no_grad():
+        img = sample(model, scheduler, shape=(1,3,32,32))
+
+    img = (img + 1) * 0.5
+    img = img.clamp(0,1)
+
+    save_image(img, output_path)
+    print(f"Saved sample to {output_path}")
+
 if __name__ == '__main__':
-    train()
+    epoch = 3
+    train(epoch)
+    sample_and_save(model_ckpt=f'ddpm_epoch_{epoch}.pth')
