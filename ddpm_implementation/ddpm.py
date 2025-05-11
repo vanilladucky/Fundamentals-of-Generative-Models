@@ -68,6 +68,7 @@ class DiffusionScheduler:
         else:
             self.register_buffer['posterior_variance'] = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod) # Section 3.2
 
+    @autocast('cuda', enabled = False)
     def q_sample(self, x_start, t, noise=None):
         """
         Diffuse the data for a given number of diffusion steps - adding noise
