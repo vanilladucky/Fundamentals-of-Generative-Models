@@ -92,18 +92,22 @@ class SinusoidalPosEmb(nn.Module):
 class ResidualBlock(nn.Module):
     def __init__(self, in_ch, out_ch, time_emb_dim):
         super().__init__()
+        # MLP to condition on time embedding
         self.mlp = nn.Sequential(
             nn.Linear(time_emb_dim, out_ch)
         )
+        # Choose num_groups dynamically: up to 8 if divisible, else fall back to in_ch/out_ch
+        g1 = 8 if in_ch % 8 == 0 else in_ch
+        g2 = 8 if out_ch % 8 == 0 else out_ch
         self.block = nn.Sequential(
-            nn.GroupNorm(8, in_ch),
+            nn.GroupNorm(g1, in_ch),
             nn.SiLU(),
-            nn.Conv2d(in_ch, out_ch, 3, padding=1),
-            nn.GroupNorm(8, out_ch),
+            nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(g2, out_ch),
             nn.SiLU(),
-            nn.Conv2d(out_ch, out_ch, 3, padding=1),
+            nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1, bias=False),
         )
-        self.res_conv = nn.Conv2d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
+        self.res_conv = nn.Conv2d(in_ch, out_ch, kernel_size=1, bias=False) if in_ch != out_ch else nn.Identity()
 
     def forward(self, x, t):
         h = self.block(x)
@@ -113,40 +117,37 @@ class ResidualBlock(nn.Module):
 class UNet(nn.Module):
     def __init__(self, img_channels=3, base_ch=64, time_emb_dim=256):
         super().__init__()
+        # Time embedding MLP
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(time_emb_dim),
             nn.Linear(time_emb_dim, time_emb_dim),
             nn.SiLU(),
             nn.Linear(time_emb_dim, time_emb_dim),
         )
-        # Downsampling
+        # Downsampling path
         self.res1 = ResidualBlock(img_channels, base_ch, time_emb_dim)
-        self.res2 = ResidualBlock(base_ch, base_ch * 2, time_emb_dim)
-        self.res3 = ResidualBlock(base_ch * 2, base_ch * 4, time_emb_dim)
-        self.pool = nn.MaxPool2d(2)
+        self.res2 = ResidualBlock(base_ch, base_ch*2, time_emb_dim)
+        self.res3 = ResidualBlock(base_ch*2, base_ch*4, time_emb_dim)
+        self.pool = nn.MaxPool2d(kernel_size=2)
         # Bottleneck
-        self.res4 = ResidualBlock(base_ch * 4, base_ch * 8, time_emb_dim)
-        # Upsampling
+        self.res4 = ResidualBlock(base_ch*4, base_ch*8, time_emb_dim)
+        # Upsampling path
         self.up = nn.Upsample(scale_factor=2, mode='nearest')
-        self.res5 = ResidualBlock(base_ch * 8, base_ch * 4, time_emb_dim)
-        self.res6 = ResidualBlock(base_ch * 4, base_ch * 2, time_emb_dim)
-        self.res7 = ResidualBlock(base_ch * 2, base_ch, time_emb_dim)
+        self.res5 = ResidualBlock(base_ch*8, base_ch*4, time_emb_dim)
+        self.res6 = ResidualBlock(base_ch*4, base_ch*2, time_emb_dim)
+        self.res7 = ResidualBlock(base_ch*2, base_ch, time_emb_dim)
         self.out = nn.Sequential(
-            nn.GroupNorm(8, base_ch),
+            nn.GroupNorm(8 if base_ch % 8 == 0 else base_ch, base_ch),
             nn.SiLU(),
-            nn.Conv2d(base_ch, img_channels, 1),
+            nn.Conv2d(base_ch, img_channels, kernel_size=1)
         )
 
     def forward(self, x, t):
-        # time embedding
         t = self.time_mlp(t)
-        # down
         x1 = self.res1(x, t)
         x2 = self.res2(self.pool(x1), t)
         x3 = self.res3(self.pool(x2), t)
-        # bottleneck
         x4 = self.res4(self.pool(x3), t)
-        # up
         x = self.up(x4)
         x = self.res5(x + x3, t)
         x = self.up(x)
