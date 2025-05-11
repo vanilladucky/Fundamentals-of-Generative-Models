@@ -160,11 +160,11 @@ class UNet(nn.Module):
         x3 = self.res3(self.pool(x2), t)
         x4 = self.res4(self.pool(x3), t)
         x = self.up(x4)
-        x = self.res5(x + x3, t)
+        x = self.res5(torch.cat([x, x3], dim=1), t)
         x = self.up(x)
-        x = self.res6(x + x2, t)
+        x = self.res6(torch.cat([x, x2], dim=1), t)
         x = self.up(x)
-        x = self.res7(x + x1, t)
+        x = self.res7(torch.cat([x, x1], dim=1), t)
         return self.out(x)
 
 # -----------------------------------------------------
