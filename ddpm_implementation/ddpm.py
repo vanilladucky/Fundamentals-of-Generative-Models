@@ -242,4 +242,4 @@ def sample_and_save(output_path='sample.png',
 if __name__ == '__main__':
     epoch = 3
     train(epoch)
-    sample_and_save(model_ckpt=f'ddpm_epoch_{epoch}.pth')
+    sample_and_save(model_ckpt=f'ddpm_epoch_{epoch-1}.pth')
