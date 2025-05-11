@@ -71,6 +71,7 @@ class DiffusionScheduler:
             noise = torch.randn_like(x_start)
         sqrt_acp = self.register_buffer['sqrt_alphas_cumprod'][t]
         sqrt_om = self.register_buffer['sqrt_one_minus_alphas_cumprod'][t]
+        print(sqrt_acp.shape, sqrt_om.shape, x_start.shape, noise.shape)
         return sqrt_acp * x_start + sqrt_om * noise
 
 # -----------------------------------------------------
