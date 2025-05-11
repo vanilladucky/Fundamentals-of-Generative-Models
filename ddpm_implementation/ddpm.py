@@ -49,17 +49,19 @@ class DiffusionScheduler:
             betas = sigmoid_beta_schedule(timesteps)
         alphas = 1.0 - betas
         alphas_cumprod = torch.cumprod(alphas, dim=0)
+        alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)
         self.register_buffer = {}
         self.register_buffer['betas'] = betas.to(device)
         self.register_buffer['alphas'] = alphas.to(device)
         self.register_buffer['alphas_cumprod'] = alphas_cumprod.to(device)
+        self.register_buffer['alphas_cumprod_prev'] = alphas_cumprod_prev.to(device)
         self.register_buffer['sqrt_alphas_cumprod'] = torch.sqrt(alphas_cumprod).to(device)
         self.register_buffer['sqrt_one_minus_alphas_cumprod'] = torch.sqrt(1 - alphas_cumprod).to(device)
         self.register_buffer['sqrt_recip_alphas'] = torch.sqrt(1.0 / alphas).to(device)
         if variance=='simple':
             self.register_buffer['posterior_variance'] = betas # Section 3.2 - claims to have similar results
         else:
-            self.register_buffer['posterior_variance'] = betas * (1.0 - alphas_cumprod[:-1]) / (1.0 - alphas_cumprod[1:]) # Section 3.2
+            self.register_buffer['posterior_variance'] = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod) # Section 3.2
 
     def q_sample(self, x_start, t, noise=None):
         """
