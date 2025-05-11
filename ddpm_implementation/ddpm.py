@@ -68,9 +68,9 @@ class DiffusionScheduler(nn.Module):
         self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1 - alphas_cumprod).to(device))
         self.register_buffer('sqrt_recip_alphas', torch.sqrt(1.0 / alphas).to(device))
         if variance=='simple':
-            self.register_buffer['posterior_variance'] = betas # Section 3.2 - claims to have similar results
+            self.register_buffer('posterior_variance', betas) # Section 3.2 - claims to have similar results
         else:
-            self.register_buffer['posterior_variance'] = betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod) # Section 3.2
+            self.register_buffer('posterior_variance', betas * (1. - alphas_cumprod_prev) / (1. - alphas_cumprod)) # Section 3.2
 
     def q_sample(self, x_start, t, noise=None):
         if noise is None:
