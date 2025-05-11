@@ -272,5 +272,5 @@ def sample_and_save(output_path='sample.png',
     print(f"Saved sample to {output_path}")
 
 if __name__ == '__main__':
-    epoch = 3
+    epoch = 10
     train_and_eval(epoch)
