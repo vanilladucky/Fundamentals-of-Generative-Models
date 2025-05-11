@@ -176,33 +176,69 @@ def p_losses(model, scheduler, x_start, t):
     return F.mse_loss(pred, noise)
 
 
-def train(e):
+def evaluate(model, scheduler, loader, device):
+    model.eval()
+    total_loss = 0.0
+    with torch.no_grad():
+        for x, _ in loader:
+            x = x.to(device)
+            # randomly sample timesteps for each image
+            t = torch.randint(0, scheduler.timesteps, (x.size(0),), device=device)
+            loss = p_losses(model, scheduler, x, t)
+            total_loss += loss.item() * x.size(0)
+    return total_loss / len(loader.dataset)
+
+
+def train_and_eval(epochs):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
-        transforms.Resize(32),
-        transforms.CenterCrop(32),
+        transforms.Resize(128),
+        transforms.CenterCrop(128),
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,))
     ])
-    data = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
-    loader = DataLoader(data, batch_size=128, shuffle=True, num_workers=4)
 
-    model = UNet().to(device)
+    # train / test splits
+    train_ds = datasets.CIFAR10('./data', train=True,  download=True, transform=transform)
+    test_ds  = datasets.CIFAR10('./data', train=False, download=True, transform=transform)
+    train_loader = DataLoader(train_ds, batch_size=32, shuffle=True,  num_workers=4)
+    test_loader  = DataLoader(test_ds,  batch_size=32, shuffle=False, num_workers=4)
+
+    model     = UNet().to(device)
     scheduler = DiffusionScheduler(timesteps=1000, device=device).to(device)
-    optim = torch.optim.Adam(model.parameters(), lr=2e-4)
+    optim     = torch.optim.Adam(model.parameters(), lr=2e-4)
 
-    for epoch in range(e):
-        for step, (x, _) in enumerate(loader):
+    for epoch in range(epochs):
+        # ——— Training ———
+        model.train()
+        for step, (x, _) in enumerate(train_loader):
             x = x.to(device)
             t = torch.randint(0, scheduler.timesteps, (x.size(0),), device=device)
             loss = p_losses(model, scheduler, x, t)
-            optim.zero_grad(); loss.backward(); optim.step()
+            optim.zero_grad()
+            loss.backward()
+            optim.step()
+
             if step % 100 == 0:
-                print(f"Epoch {epoch} Step {step} Loss {loss.item():.4f}")
-        torch.save(model.state_dict(), f"ddpm_epoch_{epoch}.pth")
+                print(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
+
+        # save checkpoint
+        ckpt = f"ddpm_epoch_{epoch}.pth"
+        torch.save(model.state_dict(), ckpt)
+
+        # ——— Evaluation ———
+        test_loss = evaluate(model, scheduler, test_loader, device)
+        print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f}")
+
+        # ——— Quick sample grid ———
+        sample_and_save(
+            output_path=f"sample_epoch_{epoch}.png",
+            model_ckpt=ckpt,
+            device=device
+        )
 
 @torch.no_grad()
-def sample(model, scheduler, shape=(16,3,32,32)):
+def sample(model, scheduler, shape=(16,3,128,128)):
     model.eval()
     x = torch.randn(shape, device=scheduler.betas.device)
     for i in reversed(range(scheduler.timesteps)):
@@ -241,5 +277,4 @@ def sample_and_save(output_path='sample.png',
 
 if __name__ == '__main__':
     epoch = 3
-    train(epoch)
-    sample_and_save(model_ckpt=f'ddpm_epoch_{epoch-1}.pth')
+    train_and_eval(epoch)
