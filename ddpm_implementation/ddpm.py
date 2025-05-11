@@ -192,8 +192,8 @@ def evaluate(model, scheduler, loader, device):
 def train_and_eval(epochs):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
-        transforms.Resize(128),
-        transforms.CenterCrop(128),
+        transforms.Resize(256),
+        transforms.CenterCrop(256),
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,))
     ])
@@ -209,7 +209,6 @@ def train_and_eval(epochs):
     optim     = torch.optim.Adam(model.parameters(), lr=2e-4)
 
     for epoch in range(epochs):
-        # ——— Training ———
         model.train()
         for step, (x, _) in enumerate(train_loader):
             x = x.to(device)
@@ -222,15 +221,12 @@ def train_and_eval(epochs):
             if step % 100 == 0:
                 print(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
 
-        # save checkpoint
         ckpt = f"ddpm_epoch_{epoch}.pth"
         torch.save(model.state_dict(), ckpt)
 
-        # ——— Evaluation ———
         test_loss = evaluate(model, scheduler, test_loader, device)
         print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f}")
 
-        # ——— Quick sample grid ———
         sample_and_save(
             output_path=f"sample_epoch_{epoch}.png",
             model_ckpt=ckpt,
@@ -238,7 +234,7 @@ def train_and_eval(epochs):
         )
 
 @torch.no_grad()
-def sample(model, scheduler, shape=(16,3,128,128)):
+def sample(model, scheduler, shape=(16,3,256,256)):
     model.eval()
     x = torch.randn(shape, device=scheduler.betas.device)
     for i in reversed(range(scheduler.timesteps)):
@@ -267,7 +263,7 @@ def sample_and_save(output_path='sample.png',
     scheduler = DiffusionScheduler(timesteps=1000, device=device).to(device)
 
     with torch.no_grad():
-        img = sample(model, scheduler, shape=(1,3,32,32))
+        img = sample(model, scheduler, shape=(1,3,256,256))
 
     img = (img + 1) * 0.5
     img = img.clamp(0,1)
