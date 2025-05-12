@@ -127,7 +127,7 @@ class ResidualBlock(nn.Module):
 # U-Net with concatenation skips
 # -----------------------------------------------------
 class UNet(nn.Module):
-    def __init__(self, img_channels=3, base_ch=128, time_emb_dim=512):
+    def __init__(self, img_channels=3, base_ch=64, time_emb_dim=256):
         super().__init__()
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(time_emb_dim),
