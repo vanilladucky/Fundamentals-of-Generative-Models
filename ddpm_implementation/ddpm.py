@@ -192,8 +192,8 @@ def evaluate(model, scheduler, loader, device):
 def train_and_eval(epochs):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(256),
+        transforms.Resize(128),
+        transforms.CenterCrop(128),
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,))
     ])
@@ -234,7 +234,7 @@ def train_and_eval(epochs):
         )
 
 @torch.no_grad()
-def sample(model, scheduler, shape=(16,3,256,256)):
+def sample(model, scheduler, shape=(16,3,128,128)):
     model.eval()
     x = torch.randn(shape, device=scheduler.betas.device)
     for i in reversed(range(scheduler.timesteps)):
@@ -263,7 +263,7 @@ def sample_and_save(output_path='sample.png',
     scheduler = DiffusionScheduler(timesteps=1000, device=device).to(device)
 
     with torch.no_grad():
-        img = sample(model, scheduler, shape=(1,3,256,256))
+        img = sample(model, scheduler, shape=(1,3,128,128))
 
     img = (img + 1) * 0.5
     img = img.clamp(0,1)
