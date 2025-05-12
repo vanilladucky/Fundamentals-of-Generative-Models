@@ -190,11 +190,11 @@ def evaluate(model, scheduler, loader, device):
     return total_loss / len(loader.dataset)
 
 
-def train_and_eval(epochs, cuda_device=0):
+def train_and_eval(epochs, cuda_device=0, image_size = 128):
     device = f'cuda:{cuda_device}' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
-        transforms.Resize(128),
-        transforms.CenterCrop(128),
+        transforms.Resize(image_size),
+        transforms.CenterCrop(image_size),
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,))
     ])
@@ -231,7 +231,8 @@ def train_and_eval(epochs, cuda_device=0):
         sample_and_save(
             output_path=f"sample_epoch_{epoch}.png",
             model_ckpt=ckpt,
-            device=device
+            device=device,
+            sample_shape=image_size
         )
 
 @torch.no_grad()
@@ -255,7 +256,8 @@ def sample(model, scheduler, shape=(16,3,128,128)):
 
 def sample_and_save(output_path='sample.png',
                     model_ckpt='ddpm_epoch_49.pth',  
-                    device='cuda' if torch.cuda.is_available() else 'cpu'):
+                    device='cuda' if torch.cuda.is_available() else 'cpu',
+                    sample_shape = 128):
 
     model = UNet().to(device)
     model.load_state_dict(torch.load(model_ckpt, map_location=device))
@@ -264,7 +266,7 @@ def sample_and_save(output_path='sample.png',
     scheduler = DiffusionScheduler(timesteps=1000, device=device).to(device)
 
     with torch.no_grad():
-        img = sample(model, scheduler, shape=(1,3,128,128))
+        img = sample(model, scheduler, shape=(1,3,sample_shape,sample_shape))
 
     img = (img + 1) * 0.5
     img = img.clamp(0,1)
@@ -276,6 +278,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cuda', type=int, default=0, help='CUDA device number (e.g., 0, 1, etc.)')
     parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs')
+    parser.add_argument('--image_size', type=int, default=128, help='Dimension of image')
     args = parser.parse_args()
-    
-    train_and_eval(args.epochs, args.cuda)
+
+    train_and_eval(args.epochs, args.cuda, args.image_size)
