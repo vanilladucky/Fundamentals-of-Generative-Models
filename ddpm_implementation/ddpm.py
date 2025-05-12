@@ -143,7 +143,7 @@ class UNet(nn.Module):
         # bottleneck
         self.res4 = ResidualBlock(base_ch*4, base_ch*8, time_emb_dim)
         # up
-        self.up = nn.Upsample(scale_factor=2, mode='trilinear')
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear')
         self.res5 = ResidualBlock(base_ch*8 + base_ch*4, base_ch*4, time_emb_dim)
         self.res6 = ResidualBlock(base_ch*4 + base_ch*2, base_ch*2, time_emb_dim)
         self.res7 = ResidualBlock(base_ch*2 + base_ch, base_ch, time_emb_dim)
