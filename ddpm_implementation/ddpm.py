@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 import math
+import argparse
 
 # -----------------------------------------------------
 # Helper to extract timestep-dependent scalars
@@ -189,8 +190,8 @@ def evaluate(model, scheduler, loader, device):
     return total_loss / len(loader.dataset)
 
 
-def train_and_eval(epochs):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+def train_and_eval(epochs, cuda_device=0):
+    device = f'cuda:{cuda_device}' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
         transforms.Resize(128),
         transforms.CenterCrop(128),
@@ -272,5 +273,9 @@ def sample_and_save(output_path='sample.png',
     print(f"Saved sample to {output_path}")
 
 if __name__ == '__main__':
-    epoch = 10
-    train_and_eval(epoch)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--cuda', type=int, default=0, help='CUDA device number (e.g., 0, 1, etc.)')
+    parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs')
+    args = parser.parse_args()
+    
+    train_and_eval(args.epochs, args.cuda)
