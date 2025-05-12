@@ -50,7 +50,7 @@ def sigmoid_beta_schedule(timesteps, start = -3, end = 3, tau = 1, clamp_min = 1
     return torch.clip(betas, 0, 0.999)
 
 class DiffusionScheduler(nn.Module):
-    def __init__(self, timesteps=1000, device='cuda', schedule='sigmoid_beta_schedule', variance='complex'):
+    def __init__(self, timesteps=10000, device='cuda', schedule='cosine', variance='complex'):
         super().__init__()
         self.timesteps = timesteps
         if schedule == 'linear':
@@ -196,7 +196,10 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128):
         transforms.Resize(image_size),
         transforms.CenterCrop(image_size),
         transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
+        transforms.Normalize(
+            (0.5, 0.5, 0.5),
+            (0.5, 0.5, 0.5)
+        )
     ])
 
     # train / test splits
@@ -206,7 +209,7 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128):
     test_loader  = DataLoader(test_ds,  batch_size=32, shuffle=False, num_workers=4)
 
     model     = UNet().to(device)
-    scheduler = DiffusionScheduler(timesteps=1000, device=device).to(device)
+    scheduler = DiffusionScheduler(timesteps=10000, device=device).to(device)
     optim     = torch.optim.Adam(model.parameters(), lr=2e-4)
 
     for epoch in range(epochs):
@@ -263,7 +266,7 @@ def sample_and_save(output_path='sample.png',
     model.load_state_dict(torch.load(model_ckpt, map_location=device))
     model.eval()
 
-    scheduler = DiffusionScheduler(timesteps=1000, device=device).to(device)
+    scheduler = DiffusionScheduler(timesteps=10000, device=device).to(device)
 
     with torch.no_grad():
         img = sample(model, scheduler, shape=(1,3,sample_shape,sample_shape))
