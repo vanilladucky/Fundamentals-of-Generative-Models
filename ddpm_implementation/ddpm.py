@@ -50,7 +50,7 @@ def sigmoid_beta_schedule(timesteps, start = -3, end = 3, tau = 1, clamp_min = 1
     return torch.clip(betas, 0, 0.999)
 
 class DiffusionScheduler(nn.Module):
-    def __init__(self, timesteps=10000, device='cuda', schedule='linear', variance='complex'):
+    def __init__(self, timesteps=10000, device='cuda', schedule='cosine', variance='complex'):
         super().__init__()
         self.timesteps = timesteps
         if schedule == 'linear':
@@ -104,7 +104,10 @@ class SinusoidalPosEmb(nn.Module):
 class ResidualBlock(nn.Module):
     def __init__(self, in_ch, out_ch, time_emb_dim):
         super().__init__()
-        self.mlp = nn.Linear(time_emb_dim, out_ch)
+        self.mlp = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(time_emb_dim, out_ch)
+        )
         # dynamic group norm
         g1 = 8 if in_ch % 8 == 0 else in_ch
         g2 = 8 if out_ch % 8 == 0 else out_ch
@@ -112,6 +115,8 @@ class ResidualBlock(nn.Module):
             nn.GroupNorm(g1, in_ch),
             nn.SiLU(),
             nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
+        )
+        self.block2 = nn.Sequential(
             nn.GroupNorm(g2, out_ch),
             nn.SiLU(),
             nn.Conv2d(out_ch, out_ch, 3, padding=1, bias=False),
@@ -120,8 +125,11 @@ class ResidualBlock(nn.Module):
 
     def forward(self, x, t):
         h = self.block(x)
+        # Add time embedding after the first convolution
         emb = self.mlp(t).unsqueeze(-1).unsqueeze(-1)
-        return h + self.res_conv(x) + emb
+        h = h + emb
+        h = self.block2(h)
+        return h + self.res_conv(x)
 
 # -----------------------------------------------------
 # U-Net with concatenation skips
@@ -143,7 +151,7 @@ class UNet(nn.Module):
         # bottleneck
         self.res4 = ResidualBlock(base_ch*4, base_ch*8, time_emb_dim)
         # up
-        self.up = nn.Upsample(scale_factor=2, mode='nearest')
+        self.up = nn.Upsample(scale_factor=2, mode='trilinear')
         self.res5 = ResidualBlock(base_ch*8 + base_ch*4, base_ch*4, time_emb_dim)
         self.res6 = ResidualBlock(base_ch*4 + base_ch*2, base_ch*2, time_emb_dim)
         self.res7 = ResidualBlock(base_ch*2 + base_ch, base_ch, time_emb_dim)
@@ -205,12 +213,12 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128):
     # train / test splits
     train_ds = datasets.CIFAR10('./data', train=True,  download=True, transform=transform)
     test_ds  = datasets.CIFAR10('./data', train=False, download=True, transform=transform)
-    train_loader = DataLoader(train_ds, batch_size=128, shuffle=True,  num_workers=4)
-    test_loader  = DataLoader(test_ds,  batch_size=128, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_ds, batch_size=256, shuffle=True,  num_workers=4)
+    test_loader  = DataLoader(test_ds,  batch_size=256, shuffle=False, num_workers=4)
 
     model     = UNet().to(device)
     scheduler = DiffusionScheduler(timesteps=10000, device=device).to(device)
-    optim     = torch.optim.Adam(model.parameters(), lr=2e-4)
+    optim     = torch.optim.AdamW(model.parameters(), lr=2e-4)
 
     for epoch in range(epochs):
         model.train()
