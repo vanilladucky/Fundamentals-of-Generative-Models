@@ -50,7 +50,7 @@ def sigmoid_beta_schedule(timesteps, start = -3, end = 3, tau = 1, clamp_min = 1
     return torch.clip(betas, 0, 0.999)
 
 class DiffusionScheduler(nn.Module):
-    def __init__(self, timesteps=10000, device='cuda', schedule='cosine', variance='complex'):
+    def __init__(self, timesteps=10000, device='cuda', schedule='linear', variance='complex'):
         super().__init__()
         self.timesteps = timesteps
         if schedule == 'linear':
@@ -143,7 +143,7 @@ class UNet(nn.Module):
         # bottleneck
         self.res4 = ResidualBlock(base_ch*4, base_ch*8, time_emb_dim)
         # up
-        self.up = nn.Upsample(scale_factor=2, mode='bilinear')
+        self.up = nn.Upsample(scale_factor=2, mode='nearest')
         self.res5 = ResidualBlock(base_ch*8 + base_ch*4, base_ch*4, time_emb_dim)
         self.res6 = ResidualBlock(base_ch*4 + base_ch*2, base_ch*2, time_emb_dim)
         self.res7 = ResidualBlock(base_ch*2 + base_ch, base_ch, time_emb_dim)
