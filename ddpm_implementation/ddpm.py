@@ -193,14 +193,14 @@ def evaluate(model, scheduler, loader, device):
     with torch.no_grad():
         for x, _ in loader:
             x = x.to(device)
-            # MSE loss
             t = torch.randint(0, scheduler.timesteps, (x.size(0),), device=device)
             loss = p_losses(model, scheduler, x, t)
             total_loss += loss.item() * x.size(0)
             fake = sample(model, scheduler, shape=x.shape)
             real_images = ((x + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)
             fake_images = ((fake + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)    
-            fid_metric.update(real_images, fake_images)
+            fid_metric.update(real_images, real=True)
+            fid_metric.update(fake_images, real=False)
     avg_loss = total_loss / len(loader.dataset)
     fid_score = fid_metric.compute().item()
     return avg_loss, fid_score
