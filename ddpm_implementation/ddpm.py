@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 import math
+from torchmetrics.image.fid import FrechetInceptionDistance
 import argparse
 
 # -----------------------------------------------------
@@ -188,14 +189,21 @@ def p_losses(model, scheduler, x_start, t):
 def evaluate(model, scheduler, loader, device):
     model.eval()
     total_loss = 0.0
+    fid_metric = FrechetInceptionDistance(feature=64)  
     with torch.no_grad():
         for x, _ in loader:
             x = x.to(device)
-            # randomly sample timesteps for each image
+            # MSE loss
             t = torch.randint(0, scheduler.timesteps, (x.size(0),), device=device)
             loss = p_losses(model, scheduler, x, t)
             total_loss += loss.item() * x.size(0)
-    return total_loss / len(loader.dataset)
+            fake = sample(model, scheduler, shape=x.shape)
+            real_images = ((x + 1) * 0.5).clamp(0, 1)
+            fake_images = ((fake + 1) * 0.5).clamp(0, 1)
+            fid_metric.update(real_images.cpu(), fake_images.cpu())
+    avg_loss = total_loss / len(loader.dataset)
+    fid_score = fid_metric.compute().item()
+    return avg_loss, fid_score
 
 
 def train_and_eval(epochs, cuda_device=0, image_size = 128):
@@ -236,8 +244,8 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128):
         ckpt = f"ddpm_epoch_{epoch}.pth"
         torch.save(model.state_dict(), ckpt)
 
-        test_loss = evaluate(model, scheduler, test_loader, device)
-        print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f}")
+        test_loss, test_fid = evaluate(model, scheduler, test_loader, device)
+        print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f} | FID {test_fid:.2f}")
 
         sample_and_save(
             output_path=f"sample_epoch_{epoch}.png",
