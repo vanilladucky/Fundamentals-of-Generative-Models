@@ -225,7 +225,7 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128):
     test_loader  = DataLoader(test_ds,  batch_size=256, shuffle=False, num_workers=4)
 
     model     = UNet().to(device)
-    scheduler = DiffusionScheduler(timesteps=10000, device=device).to(device)
+    scheduler = DiffusionScheduler(timesteps=200000, device=device).to(device)
     optim     = torch.optim.AdamW(model.parameters(), lr=2e-4)
 
     for epoch in range(epochs):
