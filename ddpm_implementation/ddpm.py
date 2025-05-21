@@ -189,21 +189,21 @@ def p_losses(model, scheduler, x_start, t):
 def evaluate(model, scheduler, loader, device):
     model.eval()
     total_loss = 0.0
-    fid_metric = FrechetInceptionDistance(feature=64).to(device)
+    #fid_metric = FrechetInceptionDistance(feature=64).to(device)
     with torch.no_grad():
         for x, _ in loader:
             x = x.to(device)
             t = torch.randint(0, scheduler.timesteps, (x.size(0),), device=device)
             loss = p_losses(model, scheduler, x, t)
             total_loss += loss.item() * x.size(0)
-            fake = sample(model, scheduler, shape=x.shape)
-            real_images = ((x + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)
-            fake_images = ((fake + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)    
-            fid_metric.update(real_images, real=True)
-            fid_metric.update(fake_images, real=False)
+            #fake = sample(model, scheduler, shape=x.shape)
+            #real_images = ((x + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)
+            #fake_images = ((fake + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)    
+            #fid_metric.update(real_images, real=True)
+            #fid_metric.update(fake_images, real=False)
     avg_loss = total_loss / len(loader.dataset)
-    fid_score = fid_metric.compute().item()
-    return avg_loss, fid_score
+    #fid_score = fid_metric.compute().item()
+    return avg_loss
 
 
 def train_and_eval(epochs, cuda_device=0, image_size = 128):
@@ -244,8 +244,8 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128):
         ckpt = f"ddpm_epoch_{epoch}.pth"
         torch.save(model.state_dict(), ckpt)
 
-        test_loss, test_fid = evaluate(model, scheduler, test_loader, device)
-        print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f} | FID {test_fid:.2f}")
+        test_loss = evaluate(model, scheduler, test_loader, device)
+        print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f}")
 
         sample_and_save(
             output_path=f"sample_epoch_{epoch}.png",
