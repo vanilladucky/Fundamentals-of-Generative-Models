@@ -287,6 +287,8 @@ def sample_and_save(output_path='sample.png',
     with torch.no_grad():
         img = sample(model, scheduler, shape=(1,3,sample_shape,sample_shape))
 
+    print(img.min(), img.max())
+    
     img = (img + 1) * 0.5
     img = img.clamp(0,1)
 
