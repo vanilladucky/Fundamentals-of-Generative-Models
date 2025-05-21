@@ -51,7 +51,7 @@ def sigmoid_beta_schedule(timesteps, start = -3, end = 3, tau = 1, clamp_min = 1
     return torch.clip(betas, 0, 0.999)
 
 class DiffusionScheduler(nn.Module):
-    def __init__(self, timesteps=10000, device='cuda', schedule='cosine', variance='complex'):
+    def __init__(self, timesteps=10000, device='cuda', schedule='linear', variance='complex'):
         super().__init__()
         self.timesteps = timesteps
         if schedule == 'linear':
@@ -288,7 +288,7 @@ def sample_and_save(output_path='sample.png',
         img = sample(model, scheduler, shape=(1,3,sample_shape,sample_shape))
 
     print(img.min(), img.max())
-    
+
     img = (img + 1) * 0.5
     img = img.clamp(0,1)
 
