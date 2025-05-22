@@ -186,27 +186,31 @@ def p_losses(model, scheduler, x_start, t):
     return F.mse_loss(pred, noise)
 
 
-def evaluate(model, scheduler, loader, device):
+def evaluate(model, scheduler, loader, device, last=False):
     model.eval()
     total_loss = 0.0
-    #fid_metric = FrechetInceptionDistance(feature=64).to(device)
+    if last:
+        fid_metric = FrechetInceptionDistance(feature=64).to(device)
     with torch.no_grad():
         for x, _ in loader:
             x = x.to(device)
             t = torch.randint(0, scheduler.timesteps, (x.size(0),), device=device)
             loss = p_losses(model, scheduler, x, t)
             total_loss += loss.item() * x.size(0)
-            #fake = sample(model, scheduler, shape=x.shape)
-            #real_images = ((x + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)
-            #fake_images = ((fake + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)    
-            #fid_metric.update(real_images, real=True)
-            #fid_metric.update(fake_images, real=False)
+            if last:
+                fake = sample(model, scheduler, shape=x.shape)
+                real_images = ((x + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)
+                fake_images = ((fake + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)    
+                fid_metric.update(real_images, real=True)
+                fid_metric.update(fake_images, real=False)
     avg_loss = total_loss / len(loader.dataset)
-    #fid_score = fid_metric.compute().item()
-    return avg_loss
+    if last:
+        fid_score = fid_metric.compute().item()
+        return avg_loss, fid_score
+    else:
+        return avg_loss, 0
 
-
-def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000):
+def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000, batch_size = 128):
     device = f'cuda:{cuda_device}' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
         transforms.Resize(image_size),
@@ -221,8 +225,8 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000):
     # train / test splits
     train_ds = datasets.CIFAR10('./data', train=True,  download=True, transform=transform)
     test_ds  = datasets.CIFAR10('./data', train=False, download=True, transform=transform)
-    train_loader = DataLoader(train_ds, batch_size=256, shuffle=True,  num_workers=4)
-    test_loader  = DataLoader(test_ds,  batch_size=256, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=4)
+    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, num_workers=4)
 
     model     = UNet().to(device)
     scheduler = DiffusionScheduler(timesteps=steps, device=device).to(device)
@@ -243,9 +247,13 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000):
 
         ckpt = f"ddpm_epoch_{epoch}.pth"
         torch.save(model.state_dict(), ckpt)
-
-        test_loss = evaluate(model, scheduler, test_loader, device)
-        print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f}")
+        
+        if epoch == epochs-1: # Last epoch then test FID metric
+            test_loss, fid_loss = evaluate(model, scheduler, test_loader, device, True)
+            print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f} | Avg FID {fid_loss:.4f}")
+        else:
+            test_loss, fid_loss = evaluate(model, scheduler, test_loader, device, False)
+            print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f}")
 
         sample_and_save(
             output_path=f"sample_epoch_{epoch}.png",
@@ -303,6 +311,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs')
     parser.add_argument('--image_size', type=int, default=128, help='Dimension of image')
     parser.add_argument('--steps', type=int, default=1000, help='Number of time steps')
+    parser.add_argument('--batch_size', type=int, default=64, help='Batch Size')
     args = parser.parse_args()
 
-    train_and_eval(args.epochs, args.cuda, args.image_size, args.steps)
+    train_and_eval(args.epochs, args.cuda, args.image_size, args.steps, args.batch_size)
