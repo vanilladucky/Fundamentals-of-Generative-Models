@@ -206,7 +206,7 @@ def evaluate(model, scheduler, loader, device):
     return avg_loss
 
 
-def train_and_eval(epochs, cuda_device=0, image_size = 128):
+def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000):
     device = f'cuda:{cuda_device}' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
         transforms.Resize(image_size),
@@ -225,7 +225,7 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128):
     test_loader  = DataLoader(test_ds,  batch_size=256, shuffle=False, num_workers=4)
 
     model     = UNet().to(device)
-    scheduler = DiffusionScheduler(timesteps=200000, device=device).to(device)
+    scheduler = DiffusionScheduler(timesteps=steps, device=device).to(device)
     optim     = torch.optim.AdamW(model.parameters(), lr=2e-4)
 
     for epoch in range(epochs):
@@ -251,7 +251,8 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128):
             output_path=f"sample_epoch_{epoch}.png",
             model_ckpt=ckpt,
             device=device,
-            sample_shape=image_size
+            sample_shape=image_size,
+            steps=steps
         )
 
 @torch.no_grad()
@@ -276,13 +277,14 @@ def sample(model, scheduler, shape=(16,3,128,128)):
 def sample_and_save(output_path='sample.png',
                     model_ckpt='ddpm_epoch_49.pth',  
                     device='cuda' if torch.cuda.is_available() else 'cpu',
-                    sample_shape = 128):
+                    sample_shape = 128,
+                    steps=1000):
 
     model = UNet().to(device)
     model.load_state_dict(torch.load(model_ckpt, map_location=device))
     model.eval()
 
-    scheduler = DiffusionScheduler(timesteps=10000, device=device).to(device)
+    scheduler = DiffusionScheduler(timesteps=steps, device=device).to(device)
 
     with torch.no_grad():
         img = sample(model, scheduler, shape=(1,3,sample_shape,sample_shape))
@@ -300,6 +302,7 @@ if __name__ == '__main__':
     parser.add_argument('--cuda', type=int, default=0, help='CUDA device number (e.g., 0, 1, etc.)')
     parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs')
     parser.add_argument('--image_size', type=int, default=128, help='Dimension of image')
+    parser.add_argument('--steps', type=int, default=1000, help='Number of time steps')
     args = parser.parse_args()
 
-    train_and_eval(args.epochs, args.cuda, args.image_size)
+    train_and_eval(args.epochs, args.cuda, args.image_size, args.steps)
