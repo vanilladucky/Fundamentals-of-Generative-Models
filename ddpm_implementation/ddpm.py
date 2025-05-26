@@ -306,7 +306,7 @@ def sample_and_save(output_path='samples_grid.png',
                     steps=1000,
                     num_samples=50):
 
-    model = UNet().to(device)
+    model = Diffusion().to(device)
     model.load_state_dict(torch.load(model_ckpt, map_location=device))
     model.eval()
 
