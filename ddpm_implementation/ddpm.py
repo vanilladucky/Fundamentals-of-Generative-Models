@@ -99,82 +99,99 @@ class SinusoidalPosEmb(nn.Module):
         args = t[:, None].float() * freqs[None, :]
         return torch.cat([args.sin(), args.cos()], dim=-1)
 
-# -----------------------------------------------------
-# Residual block with time conditioning
-# -----------------------------------------------------
 class ResidualBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, time_emb_dim):
+    def __init__(self, main, skip=None):
         super().__init__()
-        self.mlp = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(time_emb_dim, out_ch)
-        )
-        # dynamic group norm
-        g1 = 8 if in_ch % 8 == 0 else in_ch
-        g2 = 8 if out_ch % 8 == 0 else out_ch
-        self.block = nn.Sequential(
-            nn.GroupNorm(g1, in_ch),
-            nn.SiLU(),
-            nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
-        )
-        self.block2 = nn.Sequential(
-            nn.GroupNorm(g2, out_ch),
-            nn.SiLU(),
-            nn.Conv2d(out_ch, out_ch, 3, padding=1, bias=False),
-        )
-        self.res_conv = nn.Conv2d(in_ch, out_ch, 1, bias=False) if in_ch != out_ch else nn.Identity()
+        self.main = nn.Sequential(*main)
+        self.skip = skip if skip else nn.Identity()
 
-    def forward(self, x, t):
-        h = self.block(x)
-        # Add time embedding after the first convolution
-        emb = self.mlp(t).unsqueeze(-1).unsqueeze(-1)
-        h = h + emb
-        h = self.block2(h)
-        return h + self.res_conv(x)
+    def forward(self, input):
+        return self.main(input) + self.skip(input)
 
-# -----------------------------------------------------
-# U-Net with concatenation skips
-# -----------------------------------------------------
-class UNet(nn.Module):
-    def __init__(self, img_channels=3, base_ch=64, time_emb_dim=256):
+
+class ResConvBlock(ResidualBlock):
+    def __init__(self, c_in, c_mid, c_out, dropout_last=True):
+        skip = None if c_in == c_out else nn.Conv2d(c_in, c_out, 1, bias=False)
+        super().__init__([
+            nn.Conv2d(c_in, c_mid, 3, padding=1),
+            nn.Dropout2d(0.1, inplace=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(c_mid, c_out, 3, padding=1),
+            nn.Dropout2d(0.1, inplace=True) if dropout_last else nn.Identity(),
+            nn.ReLU(inplace=True),
+        ], skip)
+
+
+class SkipBlock(nn.Module):
+    def __init__(self, main, skip=None):
         super().__init__()
-        self.time_mlp = nn.Sequential(
-            SinusoidalPosEmb(time_emb_dim),
-            nn.Linear(time_emb_dim, time_emb_dim),
-            nn.SiLU(),
-            nn.Linear(time_emb_dim, time_emb_dim)
-        )
-        # down
-        self.res1 = ResidualBlock(img_channels, base_ch, time_emb_dim)
-        self.res2 = ResidualBlock(base_ch, base_ch*2, time_emb_dim)
-        self.res3 = ResidualBlock(base_ch*2, base_ch*4, time_emb_dim)
-        self.pool = nn.MaxPool2d(2)
-        # bottleneck
-        self.res4 = ResidualBlock(base_ch*4, base_ch*8, time_emb_dim)
-        # up
-        self.up = nn.Upsample(scale_factor=2, mode='bilinear')
-        self.res5 = ResidualBlock(base_ch*8 + base_ch*4, base_ch*4, time_emb_dim)
-        self.res6 = ResidualBlock(base_ch*4 + base_ch*2, base_ch*2, time_emb_dim)
-        self.res7 = ResidualBlock(base_ch*2 + base_ch, base_ch, time_emb_dim)
-        self.out = nn.Sequential(
-            nn.GroupNorm(8 if base_ch % 8 == 0 else base_ch, base_ch),
-            nn.SiLU(),
-            nn.Conv2d(base_ch, img_channels, 1)
+        self.main = nn.Sequential(*main)
+        self.skip = skip if skip else nn.Identity()
+
+    def forward(self, input):
+        return torch.cat([self.main(input), self.skip(input)], dim=1)
+
+
+class FourierFeatures(nn.Module):
+    def __init__(self, in_features, out_features, std=1.):
+        super().__init__()
+        assert out_features % 2 == 0
+        self.weight = nn.Parameter(torch.randn([out_features // 2, in_features]) * std)
+
+    def forward(self, input):
+        f = 2 * math.pi * input @ self.weight.T
+        return torch.cat([f.cos(), f.sin()], dim=-1)
+
+
+def expand_to_planes(input, shape):
+    return input[..., None, None].repeat([1, 1, shape[2], shape[3]])
+
+
+class Diffusion(nn.Module):
+    def __init__(self):
+        super().__init__()
+        c = 64  # The base channel count
+
+        # The inputs to timestep_embed will approximately fall into the range
+        # -10 to 10, so use std 0.2 for the Fourier Features.
+        self.timestep_embed = FourierFeatures(1, 16, std=0.2)
+        self.class_embed = nn.Embedding(10, 4)
+
+        self.net = nn.Sequential(   # 32x32
+            ResConvBlock(3 + 16 + 4, c, c),
+            ResConvBlock(c, c, c),
+            SkipBlock([
+                nn.AvgPool2d(2),  # 32x32 -> 16x16
+                ResConvBlock(c, c * 2, c * 2),
+                ResConvBlock(c * 2, c * 2, c * 2),
+                SkipBlock([
+                    nn.AvgPool2d(2),  # 16x16 -> 8x8
+                    ResConvBlock(c * 2, c * 4, c * 4),
+                    ResConvBlock(c * 4, c * 4, c * 4),
+                    SkipBlock([
+                        nn.AvgPool2d(2),  # 8x8 -> 4x4
+                        ResConvBlock(c * 4, c * 8, c * 8),
+                        ResConvBlock(c * 8, c * 8, c * 8),
+                        ResConvBlock(c * 8, c * 8, c * 8),
+                        ResConvBlock(c * 8, c * 8, c * 4),
+                        nn.Upsample(scale_factor=2),
+                    ]),  # 4x4 -> 8x8
+                    ResConvBlock(c * 8, c * 4, c * 4),
+                    ResConvBlock(c * 4, c * 4, c * 2),
+                    nn.Upsample(scale_factor=2),
+                ]),  # 8x8 -> 16x16
+                ResConvBlock(c * 4, c * 2, c * 2),
+                ResConvBlock(c * 2, c * 2, c),
+                nn.Upsample(scale_factor=2),
+            ]),  # 16x16 -> 32x32
+            ResConvBlock(c * 2, c, c),
+            ResConvBlock(c, c, 3, dropout_last=False),
         )
 
-    def forward(self, x, t):
-        t = self.time_mlp(t)
-        x1 = self.res1(x, t)
-        x2 = self.res2(self.pool(x1), t)
-        x3 = self.res3(self.pool(x2), t)
-        x4 = self.res4(self.pool(x3), t)
-        x = self.up(x4)
-        x = self.res5(torch.cat([x, x3], dim=1), t)
-        x = self.up(x)
-        x = self.res6(torch.cat([x, x2], dim=1), t)
-        x = self.up(x)
-        x = self.res7(torch.cat([x, x1], dim=1), t)
-        return self.out(x)
+    def forward(self, input, log_snrs, cond):
+        timestep_embed = expand_to_planes(self.timestep_embed(log_snrs[:, None]), input.shape)
+        class_embed = expand_to_planes(self.class_embed(cond), input.shape)
+        return self.net(torch.cat([input, class_embed, timestep_embed], dim=1))
 
 # -----------------------------------------------------
 # Loss, training, sampling
@@ -228,9 +245,9 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000, batch_si
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=4)
     test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, num_workers=4)
 
-    model     = UNet().to(device)
+    model     = Diffusion().to(device)
     scheduler = DiffusionScheduler(timesteps=steps, device=device).to(device)
-    optim     = torch.optim.AdamW(model.parameters(), lr=2e-4)
+    optim     = torch.optim.Adam(model.parameters(), lr=2e-4)
 
     for epoch in range(epochs):
         model.train()
