@@ -188,7 +188,7 @@ class Diffusion(nn.Module):
             ResConvBlock(c, c, 3, dropout_last=False),
         )
 
-    def forward(self, input, log_snrs, cond):
+    def forward(self, input, log_snrs, cond=None):
         timestep_embed = expand_to_planes(self.timestep_embed(log_snrs[:, None]), input.shape)
         # class_embed = expand_to_planes(self.class_embed(cond), input.shape)
         return self.net(torch.cat([input, timestep_embed], dim=1))
