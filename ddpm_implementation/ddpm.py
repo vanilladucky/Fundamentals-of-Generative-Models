@@ -190,8 +190,8 @@ class Diffusion(nn.Module):
 
     def forward(self, input, log_snrs, cond):
         timestep_embed = expand_to_planes(self.timestep_embed(log_snrs[:, None]), input.shape)
-        class_embed = expand_to_planes(self.class_embed(cond), input.shape)
-        return self.net(torch.cat([input, class_embed, timestep_embed], dim=1))
+        # class_embed = expand_to_planes(self.class_embed(cond), input.shape)
+        return self.net(torch.cat([input, timestep_embed], dim=1))
 
 # -----------------------------------------------------
 # Loss, training, sampling
