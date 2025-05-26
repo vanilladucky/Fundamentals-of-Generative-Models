@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from torchvision.utils import save_image
+from torchvision.utils import save_image, make_grid
 import math
 from torchmetrics.image.fid import FrechetInceptionDistance
 import argparse
@@ -264,7 +264,7 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000, batch_si
         )
 
 @torch.no_grad()
-def sample(model, scheduler, shape=(16,3,128,128)):
+def sample(model, scheduler, shape=(16, 3, 128, 128)):
     model.eval()
     x = torch.randn(shape, device=scheduler.betas.device)
     for i in reversed(range(scheduler.timesteps)):
@@ -281,12 +281,13 @@ def sample(model, scheduler, shape=(16,3,128,128)):
         else:
             x = mean
     return x
-
-def sample_and_save(output_path='sample.png',
+    
+def sample_and_save(output_path='samples_grid.png',
                     model_ckpt='ddpm_epoch_49.pth',  
                     device='cuda' if torch.cuda.is_available() else 'cpu',
-                    sample_shape = 128,
-                    steps=1000):
+                    sample_shape=128,
+                    steps=1000,
+                    num_samples=50):
 
     model = UNet().to(device)
     model.load_state_dict(torch.load(model_ckpt, map_location=device))
@@ -295,14 +296,13 @@ def sample_and_save(output_path='sample.png',
     scheduler = DiffusionScheduler(timesteps=steps, device=device).to(device)
 
     with torch.no_grad():
-        img = sample(model, scheduler, shape=(1,3,sample_shape,sample_shape))
+        imgs = sample(model, scheduler, shape=(num_samples, 3, sample_shape, sample_shape))
 
-    print(img.min(), img.max())
+    imgs = (imgs + 1) * 0.5  # unnormalize from [-1, 1] to [0, 1]
+    imgs = imgs.clamp(0, 1)
 
-    img = (img + 1) * 0.5
-    img = img.clamp(0,1)
-
-    save_image(img, output_path)
+    grid = make_grid(imgs, nrow=10, padding=2)
+    save_image(grid, output_path)
     print(f"Saved sample to {output_path}")
 
 if __name__ == '__main__':
