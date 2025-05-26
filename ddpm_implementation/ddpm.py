@@ -158,7 +158,7 @@ class Diffusion(nn.Module):
         self.class_embed = nn.Embedding(10, 4)
 
         self.net = nn.Sequential(   # 32x32
-            ResConvBlock(3 + 16 + 4, c, c),
+            ResConvBlock(3 + 16, c, c),
             ResConvBlock(c, c, c),
             SkipBlock([
                 nn.AvgPool2d(2),  # 32x32 -> 16x16
