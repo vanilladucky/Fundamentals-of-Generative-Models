@@ -207,7 +207,7 @@ def evaluate(model, scheduler, loader, device, last=False):
     model.eval()
     total_loss = 0.0
     if last:
-        fid_metric = FrechetInceptionDistance(feature=64).to(device)
+        fid_metric = FrechetInceptionDistance(feature=2048).to(device)
     with torch.no_grad():
         for x, _ in loader:
             x = x.to(device)
@@ -234,8 +234,8 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000, batch_si
         transforms.CenterCrop(image_size),
         transforms.ToTensor(),
         transforms.Normalize(
-            (0.5, 0.5, 0.5),
-            (0.5, 0.5, 0.5)
+            [0.5],
+            [0.5]
         )
     ])
 
