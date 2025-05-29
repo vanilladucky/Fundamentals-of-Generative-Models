@@ -272,8 +272,9 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000, batch_si
             test_loss, fid_loss = evaluate(model, scheduler, test_loader, device, False)
             print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f}")
 
+        output_path = f"./figures/sample_epoch_{epoch}_{mode}.png"
         sample_and_save(
-            output_path=f"sample_epoch_{epoch}.png",
+            output_path=output_path,
             model_ckpt=ckpt,
             device=device,
             sample_shape=image_size,
@@ -325,7 +326,7 @@ def sample_ddim(model,
     return x
 
 
-def sample_and_save_ddim(output_path='ddim_samples.png',
+"""def sample_and_save_ddim(output_path='ddim_samples.png',
                          model_ckpt='ddpm_epoch_49.pth',
                          device='cuda',
                          sample_shape=128,
@@ -351,7 +352,7 @@ def sample_and_save_ddim(output_path='ddim_samples.png',
     imgs = imgs.clamp(0, 1)
     grid = make_grid(imgs, nrow=10, padding=2)
     save_image(grid, output_path)
-    print(f"Saved DDIM sample to {output_path}")
+    print(f"Saved DDIM sample to {output_path}")"""
 
 @torch.no_grad()
 def sample(model, scheduler, shape=(16, 3, 128, 128)):
@@ -377,7 +378,7 @@ def sample_and_save(output_path='samples_grid.png',
                     device='cuda' if torch.cuda.is_available() else 'cpu',
                     sample_shape=128,
                     steps=1000,
-                    num_samples=100,
+                    num_samples=50,
                     mode='ddpm',
                     eta=0):
 
