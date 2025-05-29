@@ -51,7 +51,7 @@ def sigmoid_beta_schedule(timesteps, start = -3, end = 3, tau = 1, clamp_min = 1
     return torch.clip(betas, 0, 0.999)
 
 class DiffusionScheduler(nn.Module):
-    def __init__(self, timesteps=10000, device='cuda', schedule='linear', variance='complex'):
+    def __init__(self, timesteps=10000, device='cuda:2', schedule='linear', variance='complex'):
         super().__init__()
         self.timesteps = timesteps
         if schedule == 'linear':
@@ -287,7 +287,7 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000, batch_si
 def sample_ddim(model,
                 scheduler,
                 shape=(16, 3, 128, 128),
-                device='cuda',
+                device='cuda:2',
                 num_ddim_steps=50,
                 eta=0.0):
 
@@ -375,7 +375,7 @@ def sample(model, scheduler, shape=(16, 3, 128, 128)):
     
 def sample_and_save(output_path='samples_grid.png',
                     model_ckpt='ddpm_epoch_49.pth',  
-                    device='cuda' if torch.cuda.is_available() else 'cpu',
+                    device='cuda:2' if torch.cuda.is_available() else 'cpu',
                     sample_shape=128,
                     steps=1000,
                     num_samples=50,
