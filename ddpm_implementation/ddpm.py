@@ -289,7 +289,7 @@ def sample_ddim(model,
                 shape=(16, 3, 128, 128),
                 device='cuda:2',
                 num_ddim_steps=50,
-                eta=0.0):
+                eta=0.5):
 
     model.eval()
     T = scheduler.timesteps
