@@ -217,7 +217,7 @@ def evaluate(model, scheduler, loader, device, last=False):
             if last:
                 fake = sample(model, scheduler, shape=x.shape)
                 real_images = ((x + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)
-                fake_images = ((fake + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)    
+                fake_images = ((fake + 1) * 0.5 * 255).clamp(0, 255).to(torch.uint8)
                 fid_metric.update(real_images, real=True)
                 fid_metric.update(fake_images, real=False)
     avg_loss = total_loss / len(loader.dataset)
@@ -242,8 +242,8 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000, batch_si
     # train / test splits
     train_ds = datasets.CIFAR10('./data', train=True,  download=True, transform=transform)
     test_ds  = datasets.CIFAR10('./data', train=False, download=True, transform=transform)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=4)
-    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=1)
+    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, num_workers=1)
 
     model     = Diffusion().to(device)
     scheduler = DiffusionScheduler(timesteps=steps, device=device).to(device)
@@ -264,7 +264,7 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000, batch_si
 
         ckpt = f"ddpm_epoch_{epoch}.pth"
         torch.save(model.state_dict(), ckpt)
-        
+
         if epoch == epochs-1: # Last epoch then test FID metric
             test_loss, fid_loss = evaluate(model, scheduler, test_loader, device, True)
             print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f} | Avg FID {fid_loss:.4f}")
@@ -272,7 +272,7 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000, batch_si
             test_loss, fid_loss = evaluate(model, scheduler, test_loader, device, False)
             print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f}")
 
-        output_path = f"./figures/sample_epoch_{epoch}_{mode}.png"
+        output_path = f"sample_epoch_{epoch}_{mode}.png"
         sample_and_save(
             output_path=output_path,
             model_ckpt=ckpt,
@@ -292,38 +292,70 @@ def sample_ddim(model,
                 eta=0.5):
 
     model.eval()
-    T = scheduler.timesteps
-    ddim_timesteps = torch.linspace(0, T - 1, num_ddim_steps, dtype=torch.long, device=device)
-    ddim_timesteps_prev = torch.cat([ddim_timesteps[1:], torch.tensor([0], device=device)])
-    
-    alphas_cumprod = scheduler.alphas_cumprod
-    sqrt_alphas_cumprod = scheduler.sqrt_alphas_cumprod
-    sqrt_one_minus_alphas_cumprod = scheduler.sqrt_one_minus_alphas_cumprod
+    # 1. grab the full timesteps array and move it to device
+    ts = scheduler.timesteps                # [T]
+    alphas   = scheduler.alphas_cumprod     # [T]
+    sqrt_a   = scheduler.sqrt_alphas_cumprod# [T]
+    sqrt_oma = scheduler.sqrt_one_minus_alphas_cumprod# [T]
+
+    # 2. pick out your 50 DDIM steps *from the actual timesteps array*
+    idx = torch.linspace(0, ts-1, num_ddim_steps, device=device).long()
+    ddim_ts       = idx            # e.g. [0,20,…,999]
+    # build the “previous” sequence by shifting the DESCENDING version
+    desc          = ddim_ts.flip(0)
+    desc_prev     = torch.cat([desc[1:], desc.new_empty(1).fill_(0)])
 
     x = torch.randn(shape, device=device)
 
-    for i, t in enumerate(reversed(ddim_timesteps)):
-        t_prev = ddim_timesteps_prev[num_ddim_steps - 1 - i]
-
+    for t, t_prev in zip(desc, desc_prev):
+        # feed the model
         eps = model(x, torch.full((shape[0],), t, device=device, dtype=torch.long))
 
-        a_t = alphas_cumprod[t]
-        a_prev = alphas_cumprod[t_prev]
-        sqrt_a_t = sqrt_alphas_cumprod[t]
-        sqrt_a_prev = sqrt_alphas_cumprod[t_prev]
-        sqrt_1_a_t = sqrt_one_minus_alphas_cumprod[t]
+        a_t    = alphas[t]
+        a_prev = alphas[t_prev]
+        sa_t   = sqrt_a[t]
+        sa_prev= sqrt_a[t_prev]
+        som_t  = sqrt_oma[t]
 
-        x0_pred = (x - sqrt_1_a_t * eps) / sqrt_a_t
+        # predicted x₀
+        x0_pred = (x - som_t * eps) / sa_t
 
-        sigma = eta * torch.sqrt((1 - a_prev) / (1 - a_t) * (1 - a_t / a_prev))
+        sigma   = eta * torch.sqrt((1 - a_prev) / (1 - a_t) * (1 - a_t / a_prev))
+        dir_xt  = torch.sqrt(1 - a_prev - sigma**2) * eps
+        noise   = torch.randn_like(x) if eta > 0 else torch.zeros_like(x)
 
-        dir_xt = torch.sqrt(1. - a_prev - sigma**2) * eps
-
-        noise = torch.randn_like(x) if eta > 0 else 0.
-
-        x = sqrt_a_prev * x0_pred + dir_xt + sigma * noise
+        x = sa_prev * x0_pred + dir_xt + sigma * noise
 
     return x
+
+
+"""def sample_and_save_ddim(output_path='ddim_samples.png',
+                         model_ckpt='ddpm_epoch_49.pth',
+                         device='cuda',
+                         sample_shape=128,
+                         steps=1000,
+                         num_samples=50,
+                         ddim_steps=50,
+                         eta=0.0):
+    model = Diffusion().to(device)
+    model.load_state_dict(torch.load(model_ckpt, map_location=device))
+    scheduler = DiffusionScheduler(timesteps=steps, device=device).to(device)
+
+    with torch.no_grad():
+        imgs = sample_ddim(
+            model,
+            scheduler,
+            shape=(num_samples, 3, sample_shape, sample_shape),
+            device=device,
+            num_ddim_steps=ddim_steps,
+            eta=eta
+        )
+
+    imgs = (imgs + 1) * 0.5
+    imgs = imgs.clamp(0, 1)
+    grid = make_grid(imgs, nrow=10, padding=2)
+    save_image(grid, output_path)
+    print(f"Saved DDIM sample to {output_path}")"""
 
 @torch.no_grad()
 def sample(model, scheduler, shape=(16, 3, 128, 128)):
@@ -343,9 +375,9 @@ def sample(model, scheduler, shape=(16, 3, 128, 128)):
         else:
             x = mean
     return x
-    
+
 def sample_and_save(output_path='samples_grid.png',
-                    model_ckpt='ddpm_epoch_49.pth',  
+                    model_ckpt='ddpm_epoch_49.pth',
                     device='cuda:2' if torch.cuda.is_available() else 'cpu',
                     sample_shape=128,
                     steps=1000,
@@ -363,14 +395,16 @@ def sample_and_save(output_path='samples_grid.png',
         if mode == 'ddpm':
             imgs = sample(model, scheduler, shape=(num_samples, 3, sample_shape, sample_shape))
         else:
-            imgs = sample_ddim(model, scheduler, shape=(num_samples, 3, sample_shape, sample_shape), device = device, num_ddim_steps=50, eta=eta)
+            imgs = sample_ddim(model, scheduler, shape=(num_samples, 3, sample_shape, sample_shape), num_ddim_steps=50, eta=eta, device='cuda:0')
 
-    imgs = (imgs + 1) * 0.5  
+    imgs = (imgs + 1) * 0.5
     imgs = imgs.clamp(0, 1)
+    print(imgs.min(), imgs.max())
 
     grid = make_grid(imgs, nrow=10, padding=2)
     save_image(grid, output_path)
     print(f"Saved sample to {output_path}")
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
