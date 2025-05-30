@@ -325,35 +325,6 @@ def sample_ddim(model,
 
     return x
 
-
-"""def sample_and_save_ddim(output_path='ddim_samples.png',
-                         model_ckpt='ddpm_epoch_49.pth',
-                         device='cuda',
-                         sample_shape=128,
-                         steps=1000,
-                         num_samples=50,
-                         ddim_steps=50,
-                         eta=0.0):
-    model = Diffusion().to(device)
-    model.load_state_dict(torch.load(model_ckpt, map_location=device))
-    scheduler = DiffusionScheduler(timesteps=steps, device=device).to(device)
-
-    with torch.no_grad():
-        imgs = sample_ddim(
-            model,
-            scheduler,
-            shape=(num_samples, 3, sample_shape, sample_shape),
-            device=device,
-            num_ddim_steps=ddim_steps,
-            eta=eta
-        )
-
-    imgs = (imgs + 1) * 0.5
-    imgs = imgs.clamp(0, 1)
-    grid = make_grid(imgs, nrow=10, padding=2)
-    save_image(grid, output_path)
-    print(f"Saved DDIM sample to {output_path}")"""
-
 @torch.no_grad()
 def sample(model, scheduler, shape=(16, 3, 128, 128)):
     model.eval()
@@ -392,7 +363,7 @@ def sample_and_save(output_path='samples_grid.png',
         if mode == 'ddpm':
             imgs = sample(model, scheduler, shape=(num_samples, 3, sample_shape, sample_shape))
         else:
-            imgs = sample_ddim(model, scheduler, shape=(num_samples, 3, sample_shape, sample_shape), num_ddim_steps=50, eta=eta)
+            imgs = sample_ddim(model, scheduler, shape=(num_samples, 3, sample_shape, sample_shape), device = device, num_ddim_steps=50, eta=eta)
 
     imgs = (imgs + 1) * 0.5  
     imgs = imgs.clamp(0, 1)
@@ -408,7 +379,7 @@ if __name__ == '__main__':
     parser.add_argument('--image_size', type=int, default=128, help='Dimension of image')
     parser.add_argument('--steps', type=int, default=1000, help='Number of time steps')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch Size')
-    parser.add_argument('--eta', type=int, default=0)
+    parser.add_argument('--eta', type=float, default=0)
     parser.add_argument('--mode', type=str, default='ddpm')
     args = parser.parse_args()
 
