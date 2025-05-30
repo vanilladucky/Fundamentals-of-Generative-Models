@@ -395,7 +395,7 @@ def sample_and_save(output_path='samples_grid.png',
         if mode == 'ddpm':
             imgs = sample(model, scheduler, shape=(num_samples, 3, sample_shape, sample_shape))
         else:
-            imgs = sample_ddim(model, scheduler, shape=(num_samples, 3, sample_shape, sample_shape), num_ddim_steps=50, eta=eta, device='cuda:0')
+            imgs = sample_ddim(model, scheduler, shape=(num_samples, 3, sample_shape, sample_shape), num_ddim_steps=50, eta=eta, device=device)
 
     imgs = (imgs + 1) * 0.5
     imgs = imgs.clamp(0, 1)
