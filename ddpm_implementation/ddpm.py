@@ -272,7 +272,7 @@ def train_and_eval(epochs, cuda_device=0, image_size = 128, steps=1000, batch_si
             test_loss, fid_loss = evaluate(model, scheduler, test_loader, device, False)
             print(f"[Eval ] Epoch {epoch} | Avg Loss {test_loss:.4f}")
 
-        output_path = f"sample_epoch_{epoch}_{mode}.png"
+        output_path = f"./figures/sample_epoch_{epoch}_{mode}.png"
         sample_and_save(
             output_path=output_path,
             model_ckpt=ckpt,
