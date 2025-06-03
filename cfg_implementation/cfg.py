@@ -267,6 +267,10 @@ class CFG(nn.Module):
         return (1 + self.guidance_str) * pred_noise_cond - self.guidance_str * pred_noise_uncond
 
     def get_loss(self, ori_image: torch.Tensor, true_label: torch.LongTensor):
+        ori_image = ori_image * torch.tensor((0.2470,0.2435,0.2616), device=ori_image.device).view(1,3,1,1) \
+                + torch.tensor((0.4914,0.4822,0.4465), device=ori_image.device).view(1,3,1,1)
+        ori_image = ori_image.clamp(0,1)                   
+        ori_image = ori_image * 2.0 - 1.0 
    
         B = ori_image.size(0)
 
