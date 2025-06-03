@@ -123,7 +123,7 @@ class UNet(nn.Module):
         self,
         n_classes,
         channels=128,
-        channel_mults=[1, 2, 2, 2],
+        channel_mults=[1, 2, 4, 8],
         attns=[False, True, False, False],
         n_res_blocks=2,
     ):
