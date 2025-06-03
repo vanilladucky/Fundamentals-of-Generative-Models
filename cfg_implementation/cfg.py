@@ -16,6 +16,7 @@ import argparse
 
 class SimpleDDPMScheduler(nn.Module):
     def __init__(self, timesteps: int = 1000, device = 'cuda:0'):
+        super().__init__()
         self.timesteps = timesteps
 
         # Example: linear beta schedule from β_start=1e−4 to β_end=0.02
