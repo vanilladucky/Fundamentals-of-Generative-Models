@@ -250,19 +250,13 @@ class CFG(nn.Module):
         return 1 - signal_ratio
 
     def perform_diffusion_process(self, ori_image, lamb, rand_noise=None):
-        signal_ratio = self.lambda_to_signal_ratio(lamb)
-        noise_ratio = self.signal_ratio_to_noise_ratio(signal_ratio)
-        mean = signal_ratio ** 0.5
-        var = noise_ratio ** 0.5
-
+        signal_ratio = self.lambda_to_signal_ratio(lamb)      
+        noise_ratio  = 1 - signal_ratio                        
+        sqrt_sr = signal_ratio.sqrt().view(-1,1,1,1)           
+        sqrt_nr = noise_ratio.sqrt().view(-1,1,1,1)            
         if rand_noise is None:
             rand_noise = self.sample_noise(batch_size=ori_image.size(0))
-
-        expand_dims = [1] * (ori_image.dim() - 1) 
-        mean = mean.view(-1, *expand_dims)  
-        var = var.view(-1, *expand_dims)
-        
-        return mean + (var ** 0.5) * rand_noise
+        return sqrt_sr * ori_image + sqrt_nr * rand_noise # Equation (6)
 
     def forward(self, noisy_image, diffusion_step, label='null'):
         # Feed through model
