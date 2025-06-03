@@ -183,7 +183,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100):
 
             # 5) Save a grid of those images to disk: 
             grid = torchvision.utils.make_grid(samples, nrow=4)
-            save_image(grid, f"samples_epoch_{epoch}.png")
+            save_image(grid, f"./figures/samples_epoch_{epoch}.png")
 
             print(f"[Sample] Saved sample grid for epoch {epoch} → samples_epoch_{epoch}.png")
 
@@ -321,9 +321,6 @@ if __name__ == "__main__":
     parser.add_argument('--image_size', type=int, default=128, help='Dimension of image')
     parser.add_argument('--steps', type=int, default=1000, help='Number of time steps')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch Size')
-    parser.add_argument('--eta', type=float, default=0)
-    parser.add_argument('--mode', type=str, default='ddpm')
-    parser.add_argument('--ddim_steps', type=int, default=100)
     args = parser.parse_args()
 
     train_and_eval(img_size = args.image_size, 
