@@ -11,22 +11,50 @@ class Swish(nn.Module):
 
 
 class TimeEmbedding(nn.Module):
-    def __init__(self, time_channels, max_len=4000):
+    def __init__(self, time_channels, max_lambda=20.0, min_lambda=-20.0, num_frequencies=64):
         super().__init__()
+        self.time_channels = time_channels
+        self.num_frequencies = num_frequencies
+        self.min_lambda = min_lambda
+        self.max_lambda = max_lambda
 
-        self.d_model = time_channels // 4
+        freq_bands = 2 ** torch.arange(num_frequencies).float()  # [num_frequencies]
 
-        pos = torch.arange(max_len).unsqueeze(1)
-        i = torch.arange(self.d_model // 2).unsqueeze(0)
-        angle = pos / (10_000 ** (2 * i / self.d_model))
-        pe_enc_mat = torch.zeros(size=(max_len, self.d_model))
-        pe_enc_mat[:, 0:: 2] = torch.sin(angle)
-        pe_enc_mat[:, 1:: 2] = torch.cos(angle)
+        self.register_buffer("freq_bands", freq_bands)  # [num_frequencies]
 
-        self.register_buffer("pos_enc_mat", pe_enc_mat)
+        # After computing sin/cos for all frequencies, we get a vector sized = 2 * num_frequencies.
+        # Use an MLP to upsample to `time_channels`.
+        self.mlp = nn.Sequential(
+            nn.Linear(2 * num_frequencies, time_channels),
+            Swish(),
+            nn.Linear(time_channels, time_channels)
+        )
 
-    def forward(self, diffusion_step):
-        return self.pos_enc_mat[diffusion_step.long()]
+    def forward(self, lamb: torch.Tensor):
+        """
+        lamb: a shape [B] float‐tensor containing real λ values (in the range [min_lambda, max_lambda]).
+        Returns: a [B, time_channels] embedding.
+        """
+        # 1) Clamp λ to [min_lambda, max_lambda], then scale to [0, 1]:
+        lamb_clamped = lamb.clamp(self.min_lambda, self.max_lambda)
+        # Optionally, normalize to [0, 1]:
+        lamb_norm = (lamb_clamped - self.min_lambda) / (self.max_lambda - self.min_lambda)  # [B]
+        
+        # 2) Expand to shape [B, num_frequencies], multiply by freq_bands to get real argument
+        #    For each λ_i:  x_k = λ_norm_i * freq_bands[k].  (Choice of scaling is somewhat arbitrary, but typical.)
+        #    Then compute sin(x_k) and cos(x_k).
+        B = lamb_norm.shape[0]
+        freqs = self.freq_bands.view(1, -1)       # [1, num_frequencies]
+        x = lamb_norm.view(-1, 1) * freqs         # [B, num_frequencies]
+
+        # 3) Build the sinusoidal vector of length 2 * num_frequencies:
+        sin_emb = torch.sin(x)                    # [B, num_frequencies]
+        cos_emb = torch.cos(x)                    # [B, num_frequencies]
+        pe = torch.cat([sin_emb, cos_emb], dim=1) # [B, 2*num_frequencies]
+
+        # 4) Pass through the MLP to get [B, time_channels]
+        out = self.mlp(pe)                        # [B, time_channels]
+        return out
 
 
 class ResConvSelfAttn(nn.Module):
@@ -135,10 +163,7 @@ class UNet(nn.Module):
 
         time_channels = channels * 4
         self.time_embed = nn.Sequential(
-            TimeEmbedding(max_len=1000, time_channels=time_channels),
-            nn.Linear(channels, time_channels),
-            Swish(),
-            nn.Linear(time_channels, time_channels),
+            TimeEmbedding(time_channels=time_channels)
         )
         self.label_embed = nn.Embedding(n_classes + 1, time_channels)
 
@@ -203,7 +228,6 @@ class UNet(nn.Module):
 
     def forward(self, noisy_image, diffusion_step, label="null"):
         x = self.init_conv(noisy_image)
-        # print(f"Diffusion step: {diffusion_step.shape}")
         t = self.time_embed(diffusion_step)
 
         B = noisy_image.shape[0]
@@ -214,7 +238,6 @@ class UNet(nn.Module):
         else:
             label_tensor = label
         y = self.label_embed(label_tensor)   
-        # print(f"t shape: {t.shape} and y shape: {y.shape}")   
         c = t + y
 
         xs = [x]
