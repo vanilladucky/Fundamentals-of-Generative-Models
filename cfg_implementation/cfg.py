@@ -19,7 +19,6 @@ class SimpleDDPMScheduler(nn.Module):
         super().__init__()
         self.timesteps = timesteps
 
-        # Example: linear beta schedule from β_start=1e−4 to β_end=0.02
         beta_start = 1e-4
         beta_end = 0.02
         betas = torch.linspace(beta_start, beta_end, timesteps, dtype=torch.float32)
@@ -131,7 +130,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
     net = UNet(n_classes=10).to(device)
     cfg = CFG(net = net, img_size=img_size, batch_size=batch_size, device=device, timesteps=timesteps)
     optim = torch.optim.Adam(net.parameters(), lr=base_lr)
-    scheduler = SimpleDDPMScheduler(timesteps=timesteps, device=device)
+    scheduler = SimpleDDPMScheduler(timesteps=timesteps, device=device).to(device)
 
     for epoch in range(epochs):
         net.train()
@@ -155,7 +154,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
             for step, (img, labels) in enumerate(test_loader):
                 images = img.to(device)
                 labels = labels.to(device)
-                loss = cfg.get_loss(images, labels)
+                loss = cfg.get_loss(images, labels, scheduler=scheduler)
                 total_loss+=loss.item()
             total_loss/=step
             print(f"[Eval] Epoch {epoch} | Loss {total_loss:.4f}") 
