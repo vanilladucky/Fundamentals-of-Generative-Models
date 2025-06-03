@@ -26,10 +26,6 @@ class SimpleDDPMScheduler(nn.Module):
 
         alphas = 1.0 - betas
         alphas_cumprod = torch.cumprod(alphas, dim=0)
-
-        self.alphas_cumprod = alphas_cumprod                       
-        self.sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)       
-        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - alphas_cumprod)  
         
         self.register_buffer('alphas_cumprod', alphas_cumprod.to(device))
         self.register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod).to(device))
