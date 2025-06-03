@@ -54,7 +54,7 @@ def sample_ddim_cfg(
         
         # Create a schedule from max_lambda to min_lambda
         lambdas = torch.linspace(max_lambda, min_lambda, num_ddim_steps, device=device)
-        lambdas_prev = torch.cat(lambdas[1:], torch.tensor([min_lambda], device=device))
+        lambdas_prev = torch.cat([lambdas[1:], torch.tensor([min_lambda], device=device)])
 
         # Initialize with Gaussian noise
         x = torch.randn(shape, device=device)
