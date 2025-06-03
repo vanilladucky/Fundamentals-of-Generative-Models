@@ -346,4 +346,4 @@ if __name__ == "__main__":
                     timesteps = args.steps,
                     epochs = args.epochs,
                     base_lr = args.base_lr,
-                    guidance_str = parser.guidance_strength)
+                    guidance_str = args.guidance_strength)
