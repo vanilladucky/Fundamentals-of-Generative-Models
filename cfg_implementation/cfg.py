@@ -33,85 +33,75 @@ class SimpleDDPMScheduler(nn.Module):
 
 @torch.no_grad()
 def sample_ddim_cfg(
-    model,
-    scheduler: SimpleDDPMScheduler,
-    labels_cond: torch.LongTensor,
-    shape=(16, 3, 32, 32),
-    device="cuda:0",
-    num_ddim_steps: int = 50,
-    eta: float = 0.0,
-    w: float = 1.0,
-) -> torch.Tensor:
+        model,
+        scheduler: SimpleDDPMScheduler,  # We'll use this differently
+        labels_cond: torch.LongTensor,
+        shape=(16, 3, 32, 32),
+        device="cuda:0",
+        num_ddim_steps: int = 50,
+        eta: float = 0.0,
+        w: float = 1.0,
+        ) -> torch.Tensor:
 
-    model.eval()
-    B = shape[0]
-    T = scheduler.alphas_cumprod.shape[0]  # total number of discrete timesteps, e.g. 1000
-    device = torch.device(device)
+        model.eval()
+        B = shape[0]
+        device = torch.device(device)
+        
+        # Continuous time parameters from your CFG class
+        min_lambda = model.min_lambda
+        max_lambda = model.max_lambda
+        timesteps = model.timesteps
+        
+        # Create a schedule from max_lambda to min_lambda
+        lambdas = torch.linspace(max_lambda, min_lambda, num_ddim_steps, device=device)
+        lambdas_prev = torch.cat(lambdas[1:], torch.tensor([min_lambda], device=device))
 
-    # 1) Build a list of num_ddim_steps discrete timesteps in [0, T-1], evenly spaced.
-    #    Example: if T=1000, num_ddim_steps=50, then ddim_timesteps might be
-    #    [  0, 20, 40, …, 980, 999 ].
-    ddim_timesteps = torch.linspace(0, T - 1, num_ddim_steps, dtype=torch.long, device=device)
-    ddim_timesteps_prev = torch.cat([ddim_timesteps[1:], torch.tensor([0], device=device, dtype=torch.long)])
-    # Now timesteps_prev[i] = next step in the reversed loop.
+        # Initialize with Gaussian noise
+        x = torch.randn(shape, device=device)
 
-    # 2) Initialize with Gaussian at the “noisiest” step:
-    x = torch.randn(shape, device=device)  # shape [B,3,H,W]
+        # Unconditional labels
+        null_labels = torch.full((B,), fill_value=model.n_classes, dtype=torch.long, device=device)
 
-    # 3) Make an “uncond” label vector:
-    #    (We assume your UNet’s label embedding uses `n_classes+1` as the “null” index.)
-    null_labels = torch.full((B,), fill_value=model.n_classes, dtype=torch.long, device=device)
+        for i, lamb in enumerate(reversed(lambdas)):
+            lamb_prev = lambdas_prev[num_ddim_steps - 1 - i]
 
-    # 4) Loop in reverse over the chosen timesteps:
-    for i, t in enumerate(reversed(ddim_timesteps)):
-        t_prev = ddim_timesteps_prev[num_ddim_steps - 1 - i]
+            # Convert lambda to signal ratio
+            signal_ratio = model.lambda_to_signal_ratio(lamb)             # γ(λ)
+            noise_ratio = model.signal_ratio_to_noise_ratio(signal_ratio)  # 1-γ(λ)
+            signal_ratio_prev = model.lambda_to_signal_ratio(lamb_prev)    # γ(λ_prev)
 
-        # (a) Grab scalar α_t, α_{t_prev}, etc.
-        alpha_t        = scheduler.alphas_cumprod[t]                   # α_t
-        alpha_prev     = scheduler.alphas_cumprod[t_prev]              # α_{t_prev}
-        sqrt_alpha_t   = scheduler.sqrt_alphas_cumprod[t]              # √α_t
-        sqrt_alpha_prev = scheduler.sqrt_alphas_cumprod[t_prev]        # √α_{t_prev}
-        sqrt_one_minus_alpha_t = scheduler.sqrt_one_minus_alphas_cumprod[t]  # √(1−α_t)
+            # Broadcast for element-wise operations
+            sqrt_sr = torch.sqrt(signal_ratio).view(-1, 1, 1, 1)          # √γ(λ)
+            sqrt_nr = torch.sqrt(noise_ratio).view(-1, 1, 1, 1)            # √(1-γ(λ))
+            sqrt_sr_prev = torch.sqrt(signal_ratio_prev).view(-1, 1, 1, 1) # √γ(λ_prev)
 
-        # (b) Build a [B]-sized LongTensor of “current timestep t”:
-        t_batch = torch.full((B,), fill_value=int(t.item()), dtype=torch.long, device=device)
+            # Build a [B]-sized tensor of current lambda
+            lamb_batch = torch.full((B,), fill_value=lamb.item(), device=device)
 
-        # (c) Compute ε_θ(x_t, t, cond) and ε_θ(x_t, t, uncond):
-        eps_cond   = model.predict_noise(noisy_image=x, diffusion_step_idx=t_batch, label=labels_cond)
-        eps_uncond = model.predict_noise(noisy_image=x, diffusion_step_idx=t_batch, label=null_labels)
+            # Compute guided noise estimate
+            eps_cond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=labels_cond)
+            eps_uncond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=null_labels)
+            eps_guided = (1.0 + w) * eps_cond - w * eps_uncond
 
-        # (d) Form the guided noise estimate:
-        #      ε̃_t = (1 + w)*ε_cond - w*ε_uncond
-        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond  # shape [B,3,H,W]
+            # Compute predicted x0
+            x0_pred = (x - sqrt_nr * eps_guided) / sqrt_sr
 
-        # (e) Compute the “predicted x0” at this step:
-        #     x0_pred = ( x_t - √(1−α_t) * ε̃_t ) / √α_t
-        #   Because we have sqrt_alpha_t [0-D], we need it as [B,1,1,1] to broadcast:
-        sa_t = sqrt_alpha_t.view(-1, 1, 1, 1)                  # [B,1,1,1]
-        soamt = sqrt_one_minus_alpha_t.view(-1, 1, 1, 1)        # [B,1,1,1]
-        x0_pred = (x - soamt * eps_guided) / sa_t               # [B,3,H,W]
+            # Compute DDIM noise-weight term (continuous version)
+            sigma_coef = (1 - signal_ratio_prev) - (signal_ratio_prev / signal_ratio) * (1 - signal_ratio)
+            ddim_sigma = eta * torch.sqrt(sigma_coef.clamp(min=0)).view(-1, 1, 1, 1)
 
-        # (f) Compute the DDIM noise‐weight term:
-        #     σ_t′ = sqrt( 1 - α_{t_prev}  -  (α_{t_prev}/α_t) * (1 - α_t) )
-        temp = (alpha_prev / alpha_t) * (1.0 - alpha_t)         # 0-D
-        coef = (1.0 - alpha_prev - temp).clamp(min=0.0)        
-        ddim_sigma = coef.sqrt()                                # 0-D
+            # Add noise if needed
+            if eta > 0:
+                noise = torch.randn_like(x)
+            else:
+                noise = torch.zeros_like(x)
 
-        # (g) Draw a random Normal only if η>0:
-        if eta > 0.0:
-            noise = torch.randn_like(x)                         # [B,3,H,W]
-        else:
-            noise = torch.zeros_like(x)
+            # Update x using continuous-time DDIM
+            x = sqrt_sr_prev * x0_pred + ddim_sigma * noise
 
-        # (h) Finally set x_{t_prev} (i.e. x ← z_{t-1}) by the DDIM update:
-        #     z_{t-1} = √α_{t_prev} * x0_pred + σ_t′ * η * noise
-        sa_prev = sqrt_alpha_prev.view(-1, 1, 1, 1)              # [B,1,1,1]
-        x = sa_prev * x0_pred + ddim_sigma * eta * noise        # [B,3,H,W]
-
-    # 5) After the loop, `x` is z_0 (the final denoised image).  Rescale from [-1,1] → [0,1]:
-    samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0  # [B,3,H,W] in [0,1]
-
-    return samples
+        # Final denoising and scaling
+        samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0
+        return samples
 
 def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_lr = 0.01, guidance_str = 0.5):
     device = f'cuda:{device}' if torch.cuda.is_available() else 'cpu'
