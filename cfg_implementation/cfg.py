@@ -32,63 +32,88 @@ class SimpleDDPMScheduler(nn.Module):
         self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1.0 - alphas_cumprod).to(device))
 
 @torch.no_grad()
-def sample_cfg_ddim(
+def sample_ddim_cfg(
     model,
     scheduler: SimpleDDPMScheduler,
-    labels: torch.LongTensor,
-    shape=(1, 3, 32, 32),
+    labels_cond: torch.LongTensor,
+    shape=(16, 3, 32, 32),
     device="cuda:0",
-    num_ddim_steps: int = 100,
-    eta: float = 0.0
+    num_ddim_steps: int = 50,
+    eta: float = 0.0,
+    w: float = 1.0,
 ) -> torch.Tensor:
 
     model.eval()
-    batch_size = shape[0]
-    T = scheduler.alphas_cumprod.shape[0]
+    B = shape[0]
+    T = scheduler.alphas_cumprod.shape[0]  # total number of discrete timesteps, e.g. 1000
     device = torch.device(device)
 
+    # 1) Build a list of num_ddim_steps discrete timesteps in [0, T-1], evenly spaced.
+    #    Example: if T=1000, num_ddim_steps=50, then ddim_timesteps might be
+    #    [  0, 20, 40, …, 980, 999 ].
     ddim_timesteps = torch.linspace(0, T - 1, num_ddim_steps, dtype=torch.long, device=device)
     ddim_timesteps_prev = torch.cat([ddim_timesteps[1:], torch.tensor([0], device=device, dtype=torch.long)])
+    # Now timesteps_prev[i] = next step in the reversed loop.
 
-    x = torch.randn(shape, device=device)
+    # 2) Initialize with Gaussian at the “noisiest” step:
+    x = torch.randn(shape, device=device)  # shape [B,3,H,W]
 
+    # 3) Make an “uncond” label vector:
+    #    (We assume your UNet’s label embedding uses `n_classes+1` as the “null” index.)
+    null_labels = torch.full((B,), fill_value=model.n_classes, dtype=torch.long, device=device)
+
+    # 4) Loop in reverse over the chosen timesteps:
     for i, t in enumerate(reversed(ddim_timesteps)):
         t_prev = ddim_timesteps_prev[num_ddim_steps - 1 - i]
 
-        alpha_t = scheduler.alphas_cumprod[t]            
-        alpha_prev = scheduler.alphas_cumprod[t_prev]        
-        sqrt_alpha_t = scheduler.sqrt_alphas_cumprod[t]   
-        sqrt_alpha_prev = scheduler.sqrt_alphas_cumprod[t_prev]  
-        sqrt_one_minus_alpha_t = scheduler.sqrt_one_minus_alphas_cumprod[t]      
+        # (a) Grab scalar α_t, α_{t_prev}, etc.
+        alpha_t        = scheduler.alphas_cumprod[t]                   # α_t
+        alpha_prev     = scheduler.alphas_cumprod[t_prev]              # α_{t_prev}
+        sqrt_alpha_t   = scheduler.sqrt_alphas_cumprod[t]              # √α_t
+        sqrt_alpha_prev = scheduler.sqrt_alphas_cumprod[t_prev]        # √α_{t_prev}
+        sqrt_one_minus_alpha_t = scheduler.sqrt_one_minus_alphas_cumprod[t]  # √(1−α_t)
 
-        diffusion_steps = torch.full(
-            (batch_size,),
-            fill_value=int(t.item()),
-            dtype=torch.long,
-            device=device,
-        )
+        # (b) Build a [B]-sized LongTensor of “current timestep t”:
+        t_batch = torch.full((B,), fill_value=int(t.item()), dtype=torch.long, device=device)
 
-        eps = model.predict_noise(noisy_image=x, diffusion_step_idx=diffusion_steps, label=labels)
+        # (c) Compute ε_θ(x_t, t, cond) and ε_θ(x_t, t, uncond):
+        eps_cond   = model.predict_noise(noisy_image=x, diffusion_step_idx=t_batch, label=labels_cond)
+        eps_uncond = model.predict_noise(noisy_image=x, diffusion_step_idx=t_batch, label=null_labels)
 
-        x0_pred = (x - sqrt_one_minus_alpha_t * eps) / sqrt_alpha_t
+        # (d) Form the guided noise estimate:
+        #      ε̃_t = (1 + w)*ε_cond - w*ε_uncond
+        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond  # shape [B,3,H,W]
 
-        sigma_t = eta * torch.sqrt((1 - alpha_prev) / (1 - alpha_t)) * torch.sqrt(
-            torch.tensor(max((1 - alpha_t / alpha_prev).item(), 0.0), device=device)
-        )
+        # (e) Compute the “predicted x0” at this step:
+        #     x0_pred = ( x_t - √(1−α_t) * ε̃_t ) / √α_t
+        #   Because we have sqrt_alpha_t [0-D], we need it as [B,1,1,1] to broadcast:
+        sa_t = sqrt_alpha_t.view(-1, 1, 1, 1)                  # [B,1,1,1]
+        soamt = sqrt_one_minus_alpha_t.view(-1, 1, 1, 1)        # [B,1,1,1]
+        x0_pred = (x - soamt * eps_guided) / sa_t               # [B,3,H,W]
 
-        under_sqrt = max((1 - alpha_prev - sigma_t**2).item(), 0.0)
-        dir_xt = torch.sqrt(torch.tensor(under_sqrt, device=device)) * eps
+        # (f) Compute the DDIM noise‐weight term:
+        #     σ_t′ = sqrt( 1 - α_{t_prev}  -  (α_{t_prev}/α_t) * (1 - α_t) )
+        temp = (alpha_prev / alpha_t) * (1.0 - alpha_t)         # 0-D
+        coef = (1.0 - alpha_prev - temp).clamp(min=0.0)        
+        ddim_sigma = coef.sqrt()                                # 0-D
 
-        if sigma_t > 0:
-            z = torch.randn_like(x)
+        # (g) Draw a random Normal only if η>0:
+        if eta > 0.0:
+            noise = torch.randn_like(x)                         # [B,3,H,W]
         else:
-            z = torch.zeros_like(x)
+            noise = torch.zeros_like(x)
 
-        x = sqrt_alpha_prev * x0_pred + dir_xt + sigma_t * z
+        # (h) Finally set x_{t_prev} (i.e. x ← z_{t-1}) by the DDIM update:
+        #     z_{t-1} = √α_{t_prev} * x0_pred + σ_t′ * η * noise
+        sa_prev = sqrt_alpha_prev.view(-1, 1, 1, 1)              # [B,1,1,1]
+        x = sa_prev * x0_pred + ddim_sigma * eta * noise        # [B,3,H,W]
 
-    return x
+    # 5) After the loop, `x` is z_0 (the final denoised image).  Rescale from [-1,1] → [0,1]:
+    samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0  # [B,3,H,W] in [0,1]
 
-def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_lr = 0.01):
+    return samples
+
+def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_lr = 0.01, guidance_str = 0.5):
     device = f'cuda:{device}' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
     transforms.ToTensor(), 
@@ -165,14 +190,15 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
             sample_labels = torch.zeros(
                 sample_batch_size, dtype=torch.long, device=device
             )  # all “class 0” (airplane)
-            samples = sample_cfg_ddim(
+            samples = sample_ddim_cfg(
                 model=cfg,                     
                 scheduler=scheduler,
-                labels=sample_labels,
+                labels_cond=sample_labels,
                 shape=(sample_batch_size, 3, img_size, img_size),
                 device=device,
                 num_ddim_steps=100,
-                eta=0.5,                       
+                eta=0.5,       
+                w = guidance_str                
             )
             # 4) samples are in roughly [−1,1] or [0,1] depending on UNet’s output range.
             #    Denormalize back to pixel range for saving: (assuming UNet learned to output in [−1,1]):
@@ -311,6 +337,7 @@ if __name__ == "__main__":
     parser.add_argument('--steps', type=int, default=1000, help='Number of time steps')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch Size')
     parser.add_argument('--base_lr', type=float, default=2e-4, help='Initial Learning Rate')
+    parser.add_argument('--guidance_strength', type=float, default=0.5)
     args = parser.parse_args()
 
     train_and_eval(img_size = args.image_size, 
@@ -318,4 +345,5 @@ if __name__ == "__main__":
                     device = args.cuda,
                     timesteps = args.steps,
                     epochs = args.epochs,
-                    base_lr = args.base_lr)
+                    base_lr = args.base_lr,
+                    guidance_str = parser.guidance_strength)
