@@ -29,6 +29,10 @@ class SimpleDDPMScheduler:
         self.alphas_cumprod = alphas_cumprod                       
         self.sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)       
         self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - alphas_cumprod)  
+        
+        self.register_buffer('alphas_cumprod', alphas_cumprod)
+        self.register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod))
+        self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1.0 - alphas_cumprod))
 
 @torch.no_grad()
 def sample_cfg_ddim(
@@ -130,7 +134,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
     net = UNet(n_classes=10).to(device)
     cfg = CFG(net = net, img_size=img_size, batch_size=batch_size, device=device, timesteps=timesteps)
     optim = torch.optim.Adam(net.parameters(), lr=base_lr)
-    scheduler = SimpleDDPMScheduler(timesteps=timesteps)
+    scheduler = SimpleDDPMScheduler(timesteps=timesteps).to(device)
 
     for epoch in range(epochs):
         net.train()
@@ -281,9 +285,9 @@ class CFG(nn.Module):
         t_int = torch.randint(low=0, high=self.timesteps, size=(B,), device=device)  # shape [B]
 
         # ========== 3) Look up αₜ and √(1–αₜ) from scheduler ==========
-        alpha_t = scheduler.alphas_cumprod[t_int].to(device)                  # [B]
-        sqrt_alpha_t = scheduler.sqrt_alphas_cumprod[t_int].view(-1,1,1,1).to(device)       # [B,1,1,1]
-        sqrt_one_minus_alpha_t = scheduler.sqrt_one_minus_alphas_cumprod[t_int].view(-1,1,1,1).to(device)    # [B,1,1,1]
+        alpha_t = scheduler.alphas_cumprod[t_int]                  # [B]
+        sqrt_alpha_t = scheduler.sqrt_alphas_cumprod[t_int].view(-1,1,1,1)       # [B,1,1,1]
+        sqrt_one_minus_alpha_t = scheduler.sqrt_one_minus_alphas_cumprod[t_int].view(-1,1,1,1)    # [B,1,1,1]
 
         # ========== 4) Sample Gaussian noise ε and build x_t ==========
         eps = self.sample_noise(B)  # [B, C, H, W]
