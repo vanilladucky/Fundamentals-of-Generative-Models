@@ -137,7 +137,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
         for step, (img,labels) in enumerate(train_loader):
             images = img.to(device)        
             labels = labels.to(device) 
-            loss = cfg.get_loss(images, labels)
+            loss = cfg.get_loss(ori_image=images, true_label=labels, scheduler=scheduler)
             optim.zero_grad()
             loss.backward()
             optim.step()
@@ -266,39 +266,45 @@ class CFG(nn.Module):
         )
         return (1 + self.guidance_str) * pred_noise_cond - self.guidance_str * pred_noise_uncond
 
-    def get_loss(self, ori_image: torch.Tensor, true_label: torch.LongTensor):
-        ori_image = ori_image * torch.tensor((0.2470,0.2435,0.2616), device=ori_image.device).view(1,3,1,1) \
-                + torch.tensor((0.4914,0.4822,0.4465), device=ori_image.device).view(1,3,1,1)
-        ori_image = ori_image.clamp(0,1)                   
-        ori_image = ori_image * 2.0 - 1.0 
-   
+    def get_loss(self, ori_image: torch.Tensor, true_label: torch.LongTensor, scheduler: SimpleDDPMScheduler):
         B = ori_image.size(0)
+        device = ori_image.device
 
-        rand_lamb = self.sample_lambda(batch_size=B)   
+        # ========== 1) Undo CIFAR-normalization → [0,1], then [–1,1] ==========
+        inv_std = torch.tensor((0.2470,0.2435,0.2616), device=device).view(1,3,1,1)
+        inv_mean = torch.tensor((0.4914,0.4822,0.4465), device=device).view(1,3,1,1)
+        x0 = ori_image * inv_std + inv_mean     # now in [0,1]
+        x0 = x0.clamp(0,1)
+        x0 = x0 * 2.0 - 1.0                      # now in [–1,1]
+        
+        # ========== 2) Sample a random integer timestep t_int ∈ {0,…,T–1} ==========
+        t_int = torch.randint(low=0, high=self.timesteps, size=(B,), device=device)  # shape [B]
 
-        rand_noise = self.sample_noise(batch_size=B)  
+        # ========== 3) Look up αₜ and √(1–αₜ) from scheduler ==========
+        alpha_t = scheduler.alphas_cumprod[t_int]                  # [B]
+        sqrt_alpha_t = scheduler.sqrt_alphas_cumprod[t_int].view(-1,1,1,1)       # [B,1,1,1]
+        sqrt_one_minus_alpha_t = scheduler.sqrt_one_minus_alphas_cumprod[t_int].view(-1,1,1,1)  # [B,1,1,1]
 
-        noisy_image = self.perform_diffusion_process(
-            ori_image=ori_image,
-            lamb=rand_lamb,
-            rand_noise=rand_noise,
-        )                                              
+        # ========== 4) Sample Gaussian noise ε and build x_t ==========
+        eps = self.sample_noise(B)  # [B, C, H, W]
+        x_t = sqrt_alpha_t * x0 + sqrt_one_minus_alpha_t * eps
 
-        coin = torch.rand(B, device=ori_image.device) 
-        use_null = (coin <  self.uncondition_prob)                   
-
+        # ========== 5) Sample “null” vs “cond” labels ==========
+        coin = torch.rand(B, device=device)
+        use_null = coin < self.uncondition_prob
         null_labels = torch.full_like(true_label, fill_value=self.n_classes)
-        cond_labels = torch.where(use_null, null_labels, true_label)
+        cond_labels = torch.where(use_null, null_labels, true_label)  # [B]
 
-        with torch.autocast(device_type=self.device.type, dtype=torch.float16) \
-            if self.device.type == "cuda" else contextlib.nullcontext():
-            pred_noise = self(
-                noisy_image=noisy_image,           
-                diffusion_step=rand_lamb,           
-                label=cond_labels                   
-            )
-            loss = F.mse_loss(pred_noise, rand_noise, reduction="mean")
-            return loss
+        # ========== 6) Predict noise via classifier-free guidance ==========
+        pred_noise = self.predict_noise(
+            noisy_image=x_t,                      # [B, C, H, W]
+            diffusion_step_idx=t_int,             # integer timesteps
+            label=cond_labels                     # [B]
+        )
+
+        # ========== 7) MSE loss against the true ε ==========
+        loss = F.mse_loss(pred_noise, eps, reduction="mean")
+        return loss
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
