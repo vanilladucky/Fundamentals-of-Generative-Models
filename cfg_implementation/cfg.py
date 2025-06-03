@@ -226,6 +226,8 @@ class CFG(nn.Module):
         self.timesteps = timesteps
         self.device = torch.device(device)
         self.n_classes = 10
+        self.min_lambda = min_lambda
+        self.max_lambda = max_lambda
 
         self.diffusion_step = torch.linspace(
             min_lambda, max_lambda, timesteps, device=device,
