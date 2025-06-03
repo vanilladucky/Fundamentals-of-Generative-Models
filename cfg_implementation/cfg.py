@@ -87,7 +87,7 @@ def sample_cfg_ddim(
 
     return x
 
-def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100):
+def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_lr = 0.01):
     device = f'cuda:{device}' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
     transforms.ToTensor(), 
@@ -129,7 +129,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100):
 
     net = UNet(n_classes=10).to(device)
     cfg = CFG(net = net, img_size=img_size, batch_size=batch_size, device=device, timesteps=timesteps)
-    optim = torch.optim.Adam(net.parameters(), lr=2e-4)
+    optim = torch.optim.Adam(net.parameters(), lr=base_lr)
     scheduler = SimpleDDPMScheduler(timesteps=timesteps)
 
     for epoch in range(epochs):
@@ -160,28 +160,23 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100):
             print(f"[Eval] Epoch {epoch} | Loss {total_loss:.4f}") 
 
         with torch.no_grad():
-            # 1) choose a batch size for sampling (e.g. 16)
             sample_batch_size = 16
-            # 2) create a “labels” tensor (e.g. sample all class id = 0)
-            #    or you can randomize it; here we'll just sample one class:
             sample_labels = torch.zeros(
                 sample_batch_size, dtype=torch.long, device=device
             )  # all “class 0” (airplane)
-            # 3) call the DDIM+CFG sampler
             samples = sample_cfg_ddim(
-                model=cfg,                     # pass the CFG wrapper itself
+                model=cfg,                     
                 scheduler=scheduler,
                 labels=sample_labels,
                 shape=(sample_batch_size, 3, img_size, img_size),
                 device=device,
-                num_ddim_steps=50,
-                eta=0.0,                       # deterministic sampling
+                num_ddim_steps=100,
+                eta=0.5,                       
             )
             # 4) samples are in roughly [−1,1] or [0,1] depending on UNet’s output range.
             #    Denormalize back to pixel range for saving: (assuming UNet learned to output in [−1,1]):
             samples = (samples.clamp(-1, 1) + 1) / 2.0  # now in [0,1]
 
-            # 5) Save a grid of those images to disk: 
             grid = torchvision.utils.make_grid(samples, nrow=4)
             save_image(grid, f"./figures/samples_epoch_{epoch}.png")
 
@@ -227,20 +222,14 @@ class CFG(nn.Module):
         ) - self.b
 
     def sample_noise(self, batch_size): 
-        # Create noise tensor 
-
         return torch.randn(
             size=(batch_size, self.img_channels, self.img_size, self.img_size),
             device=self.device,
         )
     
     def sample_lambda(self, batch_size):
-        """
-        Sample λ ∈ [min_lambda, max_lambda] for each image in the batch.
-        This returns a tensor of shape [B] with one λ per image.
-        """
-        u = torch.rand(batch_size, device=self.device)  # uniform [0, 1]
-        lamb = -2 * torch.log(torch.tan(self.a * u + self.b))  # shape [B]
+        u = torch.rand(batch_size, device=self.device)  
+        lamb = -2 * torch.log(torch.tan(self.a * u + self.b))  
         return lamb
 
     def lambda_to_signal_ratio(self, lamb):
@@ -281,9 +270,9 @@ class CFG(nn.Module):
    
         B = ori_image.size(0)
 
-        rand_lamb = self.sample_lambda(batch_size=B)   # shape = (B,)
+        rand_lamb = self.sample_lambda(batch_size=B)   
 
-        rand_noise = self.sample_noise(batch_size=B)   # shape = (B, C, H, W)
+        rand_noise = self.sample_noise(batch_size=B)  
 
         noisy_image = self.perform_diffusion_process(
             ori_image=ori_image,
@@ -296,7 +285,6 @@ class CFG(nn.Module):
 
         null_labels = torch.full_like(true_label, fill_value=self.n_classes)
         cond_labels = torch.where(use_null, null_labels, true_label)
-        # cond_labels[i] ∈ {0..n_classes}, where index == n_classes means “null”
 
         with torch.autocast(device_type=self.device.type, dtype=torch.float16) \
             if self.device.type == "cuda" else contextlib.nullcontext():
@@ -315,10 +303,12 @@ if __name__ == "__main__":
     parser.add_argument('--image_size', type=int, default=128, help='Dimension of image')
     parser.add_argument('--steps', type=int, default=1000, help='Number of time steps')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch Size')
+    parser.add_argument('--base_lr', type=float, default=0.001, help='Initial Learning Rate')
     args = parser.parse_args()
 
     train_and_eval(img_size = args.image_size, 
                     batch_size=args.batch_size,
                     device = args.cuda,
                     timesteps = args.steps,
-                    epochs = args.epochs)
+                    epochs = args.epochs,
+                    base_lr = args.base_lr)
