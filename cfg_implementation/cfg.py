@@ -314,7 +314,7 @@ if __name__ == "__main__":
     parser.add_argument('--image_size', type=int, default=128, help='Dimension of image')
     parser.add_argument('--steps', type=int, default=1000, help='Number of time steps')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch Size')
-    parser.add_argument('--base_lr', type=float, default=0.001, help='Initial Learning Rate')
+    parser.add_argument('--base_lr', type=float, default=2e-4, help='Initial Learning Rate')
     args = parser.parse_args()
 
     train_and_eval(img_size = args.image_size, 

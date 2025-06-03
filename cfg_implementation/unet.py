@@ -124,8 +124,8 @@ class UNet(nn.Module):
         n_classes,
         channels=128,
         channel_mults=[1, 2, 4, 8],
-        attns=[False, True, False, False],
-        n_res_blocks=2,
+        attns=[False, False, True, False],
+        n_res_blocks=3,
     ):
         super().__init__()
 
