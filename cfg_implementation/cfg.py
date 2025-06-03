@@ -14,8 +14,8 @@ import torchvision
 from torchvision.utils import save_image
 import argparse
 
-class SimpleDDPMScheduler:
-    def __init__(self, timesteps: int = 1000):
+class SimpleDDPMScheduler(nn.Module):
+    def __init__(self, timesteps: int = 1000, device = 'cuda:0'):
         self.timesteps = timesteps
 
         # Example: linear beta schedule from β_start=1e−4 to β_end=0.02
@@ -30,9 +30,9 @@ class SimpleDDPMScheduler:
         self.sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)       
         self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - alphas_cumprod)  
         
-        self.register_buffer('alphas_cumprod', alphas_cumprod)
-        self.register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod))
-        self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1.0 - alphas_cumprod))
+        self.register_buffer('alphas_cumprod', alphas_cumprod.to(device))
+        self.register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod).to(device))
+        self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1.0 - alphas_cumprod).to(device))
 
 @torch.no_grad()
 def sample_cfg_ddim(
@@ -134,7 +134,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
     net = UNet(n_classes=10).to(device)
     cfg = CFG(net = net, img_size=img_size, batch_size=batch_size, device=device, timesteps=timesteps)
     optim = torch.optim.Adam(net.parameters(), lr=base_lr)
-    scheduler = SimpleDDPMScheduler(timesteps=timesteps).to(device)
+    scheduler = SimpleDDPMScheduler(timesteps=timesteps, device=device)
 
     for epoch in range(epochs):
         net.train()
