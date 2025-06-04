@@ -310,7 +310,7 @@ class CFG(nn.Module):
         use_null = coin < self.uncondition_prob
         null_labels = torch.full_like(true_label, fill_value=self.n_classes)
         cond_labels = torch.where(use_null, null_labels, true_label)  
-        print(f"Label used to get_loss: {cond_labels}")
+        # print(f"Label used to get_loss: {cond_labels}")
 
         pred_noise = self.predict_noise(
             noisy_image=x_t,                      
