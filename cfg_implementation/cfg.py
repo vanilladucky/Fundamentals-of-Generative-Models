@@ -82,6 +82,11 @@ def sample_ddim_cfg(
         eps_uncond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=null_labels) 
         eps_guided = (1.0 + w) * eps_cond - w * eps_uncond                        # [B,3,H,W]
 
+        cond_norm   = eps_cond.norm().item()
+        uncond_norm = eps_uncond.norm().item()
+        guid_norm   = eps_guided.norm().item()
+        print(f"[Step {i:02d}] λ={lamb:.2f}  ||ε_cond||={cond_norm:.3e}, ||ε_uncond||={uncond_norm:.3e}, ||ε_guided||={guid_norm:.3e}")
+
         # 6) Predicted x₀ from zₜ
         x0_pred = (x - sqrt_nr * eps_guided) / sqrt_sr    # [B,3,H,W]
 
