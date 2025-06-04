@@ -280,14 +280,13 @@ class CFG(nn.Module):
         )
 
     def predict_noise(self, noisy_image, diffusion_step_idx, label):
-        diffusion_step = diffusion_step_idx.to(dtype=torch.long, device=self.device)
         # Run it through forward()
         pred_noise_cond = self(
-            noisy_image=noisy_image, diffusion_step=diffusion_step, label=label,
+            noisy_image=noisy_image, diffusion_step=diffusion_step_idx, label=label,
         )
         # Run it through forward()
         pred_noise_uncond = self(
-            noisy_image=noisy_image, diffusion_step=diffusion_step, label=torch.full((label.shape[0],), 10, dtype=torch.long, device=self.device),
+            noisy_image=noisy_image, diffusion_step=diffusion_step_idx, label=torch.full((label.shape[0],), 10, dtype=torch.long, device=self.device),
         )
         return (1 + self.guidance_str) * pred_noise_cond - self.guidance_str * pred_noise_uncond
 
