@@ -38,7 +38,7 @@ def sample_ddim_cfg(
     labels_cond: torch.LongTensor,
     shape=(16, 3, 32, 32),
     device="cuda:0",
-    num_ddim_steps: int = 50,
+    num_ddim_steps: int = 200,
     eta: float = 0.0,
     w: float = 1.0,
 ) -> torch.Tensor:
@@ -81,6 +81,8 @@ def sample_ddim_cfg(
         eps_cond   = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=labels_cond) 
         eps_uncond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=null_labels) 
         eps_guided = (1.0 + w) * eps_cond - w * eps_uncond                        # [B,3,H,W]
+
+        print("   cond_label[0] =", labels_cond[0].item(), "  uncond_label[0] =", null_labels[0].item())
 
         cond_norm   = eps_cond.norm().item()
         uncond_norm = eps_uncond.norm().item()
@@ -308,6 +310,7 @@ class CFG(nn.Module):
         use_null = coin < self.uncondition_prob
         null_labels = torch.full_like(true_label, fill_value=self.n_classes)
         cond_labels = torch.where(use_null, null_labels, true_label)  
+        print(f"Label used to get_loss: {cond_labels}")
 
         pred_noise = self.predict_noise(
             noisy_image=x_t,                      
