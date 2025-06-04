@@ -33,63 +33,78 @@ class SimpleDDPMScheduler(nn.Module):
 
 @torch.no_grad()
 def sample_ddim_cfg(
-        model,
-        scheduler: SimpleDDPMScheduler,  
-        labels_cond: torch.LongTensor,
-        shape=(16, 3, 32, 32),
-        device="cuda:0",
-        num_ddim_steps: int = 50,
-        eta: float = 0.0,
-        w: float = 1.0,
-        ) -> torch.Tensor:
+    model,
+    scheduler: SimpleDDPMScheduler,  
+    labels_cond: torch.LongTensor,
+    shape=(16, 3, 32, 32),
+    device="cuda:0",
+    num_ddim_steps: int = 50,
+    eta: float = 0.0,
+    w: float = 1.0,
+) -> torch.Tensor:
 
-        model.eval()
-        B = shape[0]
-        device = torch.device(device)
-        
-        min_lambda = model.min_lambda
-        max_lambda = model.max_lambda
-        timesteps = model.timesteps
-        
-        lambdas = torch.linspace(max_lambda, min_lambda, num_ddim_steps, device=device)
-        lambdas_prev = torch.cat([lambdas[1:], torch.tensor([min_lambda], device=device)])
+    model.eval()
+    B = shape[0]
+    device = torch.device(device)
 
-        x = torch.randn(shape, device=device)
+    min_lambda = model.min_lambda
+    max_lambda = model.max_lambda
 
-        null_labels = torch.full((B,), fill_value=model.n_classes, dtype=torch.long, device=device)
+    # 1) Build [λ₁, …, λₙ] ascending
+    lambdas = torch.linspace(min_lambda, max_lambda, num_ddim_steps, device=device)
+    # lambdas_prev[i] = λ_{i+2} for i < N−1; dummy λ₁ at the end
+    lambdas_prev = torch.cat([lambdas[1:], torch.tensor([min_lambda], device=device)])
 
-        for i, lamb in enumerate(reversed(lambdas)):
-            lamb_prev = lambdas_prev[num_ddim_steps - 1 - i]
+    # 2) Start from pure Gaussian at λ₁ = λ_min
+    x = torch.randn(shape, device=device)
 
-            signal_ratio = model.lambda_to_signal_ratio(lamb)             
-            noise_ratio = model.signal_ratio_to_noise_ratio(signal_ratio)  
-            signal_ratio_prev = model.lambda_to_signal_ratio(lamb_prev)   
+    # 3) Unconditional label = index n_classes
+    null_labels = torch.full((B,), fill_value=model.n_classes, dtype=torch.long, device=device)
 
-            sqrt_sr = torch.sqrt(signal_ratio).view(-1, 1, 1, 1)         
-            sqrt_nr = torch.sqrt(noise_ratio).view(-1, 1, 1, 1)           
-            sqrt_sr_prev = torch.sqrt(signal_ratio_prev).view(-1, 1, 1, 1) 
+    for i, lamb in enumerate(lambdas):
+        # Current λₜ
+        # Next λ_{t+1} = lambdas_prev[i], except on the last step we won't use it
+        lamb_prev = lambdas_prev[i]
 
-            lamb_batch = torch.full((B,), fill_value=lamb.item(), device=device)
+        # 4) Compute αₜ, 1−αₜ, and α_{t+1}
+        signal_ratio      = model.lambda_to_signal_ratio(lamb)        # αₜ
+        noise_ratio       = 1.0 - signal_ratio                        # 1−αₜ
+        signal_ratio_next = model.lambda_to_signal_ratio(lamb_prev)   # α_{t+1}
 
-            eps_cond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=labels_cond)
-            eps_uncond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=null_labels)
-            eps_guided = (1.0 + w) * eps_cond - w * eps_uncond
+        sqrt_sr      = torch.sqrt(signal_ratio).view(-1,1,1,1)         # √αₜ
+        sqrt_nr      = torch.sqrt(noise_ratio).view(-1,1,1,1)          # √(1−αₜ)
+        sqrt_sr_next = torch.sqrt(signal_ratio_next).view(-1,1,1,1)    # √α_{t+1}
 
-            x0_pred = (x - sqrt_nr * eps_guided) / sqrt_sr
+        # 5) Feed float λₜ into the network (no .long() cast)
+        lamb_batch = torch.full((B,), fill_value=lamb.item(), device=device)  # [B] float
 
-            sigma_coef = (1 - signal_ratio_prev) - (signal_ratio_prev / signal_ratio) * (1 - signal_ratio)
-            ddim_sigma = eta * torch.sqrt(sigma_coef.clamp(min=0)).view(-1, 1, 1, 1)
+        eps_cond   = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=labels_cond) 
+        eps_uncond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=null_labels) 
+        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond                        # [B,3,H,W]
 
-            if eta > 0:
-                noise = torch.randn_like(x)
-            else:
-                noise = torch.zeros_like(x)
+        # 6) Predicted x₀ from zₜ
+        x0_pred = (x - sqrt_nr * eps_guided) / sqrt_sr    # [B,3,H,W]
 
-            x = sqrt_sr_prev * x0_pred + ddim_sigma * noise
+        # 7) If this is the LAST iteration (i == N−1), just take x = x0_pred and break
+        if i == num_ddim_steps - 1:
+            x = x0_pred
+            break
 
-        samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0
-        return samples
+        # 8) Otherwise, compute DDIM σ for λₜ→λ_{t+1}
+        temp = (signal_ratio_next / signal_ratio) * (1.0 - signal_ratio) 
+        coef = (1.0 - signal_ratio_next - temp).clamp(min=0.0)   # 0-D
+        ddim_sigma = eta * coef.sqrt().view(-1,1,1,1)            # [1,1,1,1]
 
+        noise = torch.randn_like(x) if eta > 0.0 else torch.zeros_like(x)
+
+        # 9) DDIM update: zₜ → z_{t+1}
+        x = sqrt_sr_next * x0_pred + ddim_sigma * noise   # [B,3,H,W]
+
+    # end for
+
+    # 10) Rescale to [0,1] and return
+    samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0
+    return samples
 def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_lr = 0.01, guidance_str = 0.5):
     device = f'cuda:{device}' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
@@ -284,15 +299,6 @@ class CFG(nn.Module):
         lamb = self.sample_lambda(B) 
         eps = self.sample_noise(B)
         x_t = self.perform_diffusion_process(x0, lamb, rand_noise=eps)                
-        
-        """t_int = torch.randint(low=0, high=self.timesteps, size=(B,), device=device)  
-
-        alpha_t = scheduler.alphas_cumprod[t_int]                  
-        sqrt_alpha_t = scheduler.sqrt_alphas_cumprod[t_int].view(-1,1,1,1)      
-        sqrt_one_minus_alpha_t = scheduler.sqrt_one_minus_alphas_cumprod[t_int].view(-1,1,1,1)   
-
-        eps = self.sample_noise(B) 
-        x_t = sqrt_alpha_t * x0 + sqrt_one_minus_alpha_t * eps"""
 
         coin = torch.rand(B, device=device)
         use_null = coin < self.uncondition_prob
