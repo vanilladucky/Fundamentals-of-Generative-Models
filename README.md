@@ -24,6 +24,7 @@ This repository is updated periodically. If you have suggestions for additional 
 ### 1.1 Stochastic Interpolants
 
 * [Stochastic Interpolants: A Unifying Framework for Flows and Diffusions](https://arxiv.org/abs/2303.08797) (15 March 2023)
+* [Diffusion process](./foundational_theory/diffusion_process/) 
 
 ## 2. Generative Modeling
 

@@ -34,7 +34,7 @@ class SimpleDDPMScheduler(nn.Module):
 @torch.no_grad()
 def sample_ddim_cfg(
         model,
-        scheduler: SimpleDDPMScheduler,  # We'll use this differently
+        scheduler: SimpleDDPMScheduler,  
         labels_cond: torch.LongTensor,
         shape=(16, 3, 32, 32),
         device="cuda:0",
@@ -47,59 +47,46 @@ def sample_ddim_cfg(
         B = shape[0]
         device = torch.device(device)
         
-        # Continuous time parameters from your CFG class
         min_lambda = model.min_lambda
         max_lambda = model.max_lambda
         timesteps = model.timesteps
         
-        # Create a schedule from max_lambda to min_lambda
         lambdas = torch.linspace(max_lambda, min_lambda, num_ddim_steps, device=device)
         lambdas_prev = torch.cat([lambdas[1:], torch.tensor([min_lambda], device=device)])
 
-        # Initialize with Gaussian noise
         x = torch.randn(shape, device=device)
 
-        # Unconditional labels
         null_labels = torch.full((B,), fill_value=model.n_classes, dtype=torch.long, device=device)
 
         for i, lamb in enumerate(reversed(lambdas)):
             lamb_prev = lambdas_prev[num_ddim_steps - 1 - i]
 
-            # Convert lambda to signal ratio
-            signal_ratio = model.lambda_to_signal_ratio(lamb)             # γ(λ)
-            noise_ratio = model.signal_ratio_to_noise_ratio(signal_ratio)  # 1-γ(λ)
-            signal_ratio_prev = model.lambda_to_signal_ratio(lamb_prev)    # γ(λ_prev)
+            signal_ratio = model.lambda_to_signal_ratio(lamb)             
+            noise_ratio = model.signal_ratio_to_noise_ratio(signal_ratio)  
+            signal_ratio_prev = model.lambda_to_signal_ratio(lamb_prev)   
 
-            # Broadcast for element-wise operations
-            sqrt_sr = torch.sqrt(signal_ratio).view(-1, 1, 1, 1)          # √γ(λ)
-            sqrt_nr = torch.sqrt(noise_ratio).view(-1, 1, 1, 1)            # √(1-γ(λ))
-            sqrt_sr_prev = torch.sqrt(signal_ratio_prev).view(-1, 1, 1, 1) # √γ(λ_prev)
+            sqrt_sr = torch.sqrt(signal_ratio).view(-1, 1, 1, 1)         
+            sqrt_nr = torch.sqrt(noise_ratio).view(-1, 1, 1, 1)           
+            sqrt_sr_prev = torch.sqrt(signal_ratio_prev).view(-1, 1, 1, 1) 
 
-            # Build a [B]-sized tensor of current lambda
             lamb_batch = torch.full((B,), fill_value=lamb.item(), device=device)
 
-            # Compute guided noise estimate
             eps_cond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=labels_cond)
             eps_uncond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=null_labels)
             eps_guided = (1.0 + w) * eps_cond - w * eps_uncond
 
-            # Compute predicted x0
             x0_pred = (x - sqrt_nr * eps_guided) / sqrt_sr
 
-            # Compute DDIM noise-weight term (continuous version)
             sigma_coef = (1 - signal_ratio_prev) - (signal_ratio_prev / signal_ratio) * (1 - signal_ratio)
             ddim_sigma = eta * torch.sqrt(sigma_coef.clamp(min=0)).view(-1, 1, 1, 1)
 
-            # Add noise if needed
             if eta > 0:
                 noise = torch.randn_like(x)
             else:
                 noise = torch.zeros_like(x)
 
-            # Update x using continuous-time DDIM
             x = sqrt_sr_prev * x0_pred + ddim_sigma * noise
 
-        # Final denoising and scaling
         samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0
         return samples
 
