@@ -39,7 +39,7 @@ def sample_ddim_cfg(
     shape=(16, 3, 32, 32),
     device="cuda:0",
     num_ddim_steps: int = 200,
-    eta: float = 0.0,
+    eta: float = 0.5,
     w: float = 1.0,
 ) -> torch.Tensor:
 
@@ -310,7 +310,6 @@ class CFG(nn.Module):
         use_null = coin < self.uncondition_prob
         null_labels = torch.full_like(true_label, fill_value=self.n_classes)
         cond_labels = torch.where(use_null, null_labels, true_label)  
-        # print(f"Label used to get_loss: {cond_labels}")
 
         pred_noise = self.predict_noise(
             noisy_image=x_t,                      
