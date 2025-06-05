@@ -336,7 +336,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logging.basicConfig(
-        file_name = f"{args.file_name}.txt",
+        filename = f"{args.file_name}.txt",
         filemode='2',
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
