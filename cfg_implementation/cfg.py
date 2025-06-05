@@ -34,7 +34,7 @@ class SimpleDDPMScheduler(nn.Module):
 @torch.no_grad()
 def sample_ddim_cfg(
     model,
-    scheduler: SimpleDDPMScheduler,  
+    scheduler: SimpleDDPMScheduler,
     labels_cond: torch.LongTensor,
     shape=(16, 3, 32, 32),
     device="cuda:0",
@@ -47,77 +47,90 @@ def sample_ddim_cfg(
     B = shape[0]
     device = torch.device(device)
 
+    # 1) Narrow the λ‐range to avoid float32 saturation:
+    #    (instead of [-14, +14], we clamp to [-12, +12])
     min_lambda = model.min_lambda
     max_lambda = model.max_lambda
 
-    # 1) Build [λ₁, …, λₙ] ascending
+    # Build a strictly ascending λ‐sequence of length num_ddim_steps
     lambdas = torch.linspace(min_lambda, max_lambda, num_ddim_steps, device=device)
-    # lambdas_prev[i] = λ_{i+2} for i < N−1; dummy λ₁ at the end
+    # lambdas_prev[i] = λ_{i+1}; for the final i, we just put a dummy λ = min_lambda
     lambdas_prev = torch.cat([lambdas[1:], torch.tensor([min_lambda], device=device)])
 
-    # 2) Start from pure Gaussian at λ₁ = λ_min
+    # 2) Start from pure Gaussian at λ=mᵢₙ
     x = torch.randn(shape, device=device)
 
-    # 3) Unconditional label = index n_classes
+    # 3) Prepare “unconditional” label index = n_classes
     null_labels = torch.full((B,), fill_value=model.n_classes, dtype=torch.long, device=device)
 
+    eps_floor = 1e-6  # small lower bound to keep sqrt(α) and sqrt(1−α) from underflowing
+
     for i, lamb in enumerate(lambdas):
-        # Current λₜ
-        # Next λ_{t+1} = lambdas_prev[i], except on the last step we won't use it
         lamb_prev = lambdas_prev[i]
 
-        # 4) Compute αₜ, 1−αₜ, and α_{t+1}
-        signal_ratio      = model.lambda_to_signal_ratio(lamb)        # αₜ
-        noise_ratio       = 1.0 - signal_ratio                        # 1−αₜ
-        signal_ratio_next = model.lambda_to_signal_ratio(lamb_prev)   # α_{t+1}
+        # 4) Compute αₜ = sigmoid(lamb), 1−αₜ, and α_{t+1} = sigmoid(lamb_prev)
+        #    but always clamp α in [eps_floor, 1−eps_floor]
+        alpha_t = model.lambda_to_signal_ratio(lamb).clamp(min=eps_floor, max=1.0 - eps_floor)       # [scalar]
+        one_minus_t = (1.0 - alpha_t).clamp(min=eps_floor)                                         # [scalar]
+        alpha_next = model.lambda_to_signal_ratio(lamb_prev).clamp(min=eps_floor, max=1.0 - eps_floor)  # [scalar]
+        one_minus_next = (1.0 - alpha_next).clamp(min=eps_floor)                                     # [scalar]
 
-        eps_for_stability = 1e-6
-        sqrt_sr      = torch.sqrt(signal_ratio.clamp(min=eps_for_stability)).view(-1,1,1,1)         # √αₜ
-        sqrt_nr      = torch.sqrt(noise_ratio.clamp(min=eps_for_stability)).view(-1,1,1,1)          # √(1−αₜ)
-        sqrt_sr_next = torch.sqrt(signal_ratio_next.clamp(min=eps_for_stability)).view(-1,1,1,1)    # √α_{t+1}
+        # 5) Build √αₜ, √(1−αₜ), √α_{t+1}
+        sqrt_sr      = torch.sqrt(alpha_t).view(-1, 1, 1, 1)        # [1,1,1,1]
+        sqrt_nr      = torch.sqrt(one_minus_t).view(-1, 1, 1, 1)     # [1,1,1,1]
+        sqrt_sr_next = torch.sqrt(alpha_next).view(-1, 1, 1, 1)      # [1,1,1,1]
 
-        # 5) Feed float λₜ into the network (no .long() cast)
+        # 6) Feed the FLOAT λₜ into the network (no .long() cast!)
         lamb_batch = torch.full((B,), fill_value=lamb.item(), device=device)  # [B] float
 
         eps_cond   = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=labels_cond) 
         eps_uncond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=null_labels) 
-        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond                        # [B,3,H,W]
+        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond                         # [B,3,H,W]
 
-        # print("   cond_label[0] =", labels_cond[0].item(), "  uncond_label[0] =", null_labels[0].item())
-
-        cond_norm   = eps_cond.norm().item()
-        uncond_norm = eps_uncond.norm().item()
-        guid_norm   = eps_guided.norm().item()
         if i > 0 and i % 5 == 0:
-            logging.info(f"[Step {i:02d}] λ={lamb:.2f}  ||ε_cond||={cond_norm:.3e}, ||ε_uncond||={uncond_norm:.3e}, ||ε_guided||={guid_norm:.3e}")
-        # print(f"[Step {i:02d}] λ={lamb:.2f}  ||ε_cond||={cond_norm:.3e}, ||ε_uncond||={uncond_norm:.3e}, ||ε_guided||={guid_norm:.3e}")
+            logging.info(f"[Step {i:03d}] λ={lamb:.2f}  "
+                         f"||ε_cond||={eps_cond.norm().item():.3e}, "
+                         f"||ε_uncond||={eps_uncond.norm().item():.3e}, "
+                         f"||ε_guided||={eps_guided.norm().item():.3e}")
 
-        # 6) Predicted x₀ from zₜ
-        x0_pred = (x - sqrt_nr * eps_guided) / sqrt_sr    # [B,3,H,W]
+        # 7) Predict x₀ from xₜ and the guided ε̃ₜ
+        #    x0_pred = (x_t - sqrt(1−αₜ) · ε̃ₜ) / sqrt(αₜ)
+        x0_pred = (x - sqrt_nr * eps_guided) / sqrt_sr  # [B,3,H,W]
 
-        # 7) If this is the LAST iteration (i == N−1), just take x = x0_pred and break
+        # 8) If this is the LAST iteration:
+        #    Take x = x0_pred and break (no further update).
         if i == num_ddim_steps - 1:
             x = x0_pred
             break
 
-        # 8) Otherwise, compute DDIM σ for λₜ→λ_{t+1}
-        temp = (signal_ratio_next / signal_ratio) * (1.0 - signal_ratio) 
-        coef = (1.0 - signal_ratio_next - temp).clamp(min=0.0)   # 0-D
-        ddim_sigma = eta * coef.sqrt().view(-1,1,1,1)            # [1,1,1,1]
+        # 9) Otherwise, compute the standard DDIM σ‐coefficient:
+        #    σₜ² = η² · [ ((1−α_{t+1})/(1−αₜ)) · (1 − αₜ/α_{t+1}) ]
+        termA = one_minus_next / one_minus_t                   # scalar
+        termB = (alpha_next - alpha_t) / alpha_next            # scalar
+        ddim_sigma_sq = (termA * termB).clamp(min=0.0)         # scalar ≥ 0
+        ddim_sigma    = (eta * torch.sqrt(ddim_sigma_sq)).view(-1, 1, 1, 1)  # [1,1,1,1]
 
-        noise = torch.randn_like(x) if eta > 0.0 else torch.zeros_like(x)
+        # 10) Sample noise (only if η > 0)
+        if eta > 0.0:
+            noise = torch.randn_like(x)
+        else:
+            noise = torch.zeros_like(x)
 
-        # 9) DDIM update: zₜ → z_{t+1}
-        x = sqrt_sr_next * x0_pred + ddim_sigma * noise   # [B,3,H,W]
+        # 11) The DDIM update: zₜ → z_{t+1}
+        #     x_{t+1} = √α_{t+1} · x0_pred  +  σₜ ·  noise
+        x = sqrt_sr_next * x0_pred + ddim_sigma * noise       # [B,3,H,W]
 
     # end for
-    print(f"samples.min={x.min():.3f}, max={x.max():.3f}, "
-                f"mean={x.mean():.3f}, std={x.std():.3f}, shape={x.shape}")
-    # 10) Rescale to [0,1] and return
-    samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0
-    print(f"After clamping -> samples.min={samples.min():.3f}, max={samples.max():.3f}, "
-                f"mean={samples.mean():.3f}, std={samples.std():.3f}, shape={samples.shape}")
-    
+
+    # 12) Before clamping, log the raw range of x
+    logging.info(f"RAW x before clamp: min={x.min().item():.3f}, "
+                 f"max={x.max().item():.3f}, mean={x.mean().item():.3f}, std={x.std().item():.3f}")
+
+    # 13) Finally, clamp to [−1, +1] and map to [0,1]:
+    samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0  # [B,3,H,W] in [0,1]
+    logging.info(f"After clamp: samples.min={samples.min().item():.3f}, "
+                 f"max={samples.max().item():.3f}, mean={samples.mean().item():.3f}, std={samples.std().item():.3f}")
+
     return samples
 
 def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_lr = 0.01, guidance_str = 0.5):
@@ -223,8 +236,8 @@ class CFG(nn.Module):
         img_size, 
         batch_size,
         device,
-        min_lambda = -14,
-        max_lambda = 14,
+        min_lambda = -12,
+        max_lambda = 12,
         guidance_coeff = 0.5,
         uncondition_prob = 0.1, 
         interpol_coef = 0.3,
@@ -273,6 +286,7 @@ class CFG(nn.Module):
         return 1 - signal_ratio
 
     def perform_diffusion_process(self, ori_image, lamb, rand_noise=None):
+        lamb_clamped = lamb.clamp(self.min_lambda, self.max_lambda)
         signal_ratio = self.lambda_to_signal_ratio(lamb)      
         noise_ratio  = 1 - signal_ratio                        
         sqrt_sr = signal_ratio.sqrt().view(-1,1,1,1)           
