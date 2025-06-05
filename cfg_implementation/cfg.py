@@ -13,7 +13,7 @@ from torchvision import datasets, transforms
 import torchvision
 from torchvision.utils import save_image
 import argparse
-from torchsummary import summary
+import logging
 
 class SimpleDDPMScheduler(nn.Module):
     def __init__(self, timesteps: int = 1000, device = 'cuda:0'):
@@ -38,7 +38,7 @@ def sample_ddim_cfg(
     labels_cond: torch.LongTensor,
     shape=(16, 3, 32, 32),
     device="cuda:0",
-    num_ddim_steps: int = 500,
+    num_ddim_steps: int = 256,
     eta: float = 0.5,
     w: float = 1.0,
 ) -> torch.Tensor:
@@ -82,12 +82,14 @@ def sample_ddim_cfg(
         eps_uncond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=null_labels) 
         eps_guided = (1.0 + w) * eps_cond - w * eps_uncond                        # [B,3,H,W]
 
-        print("   cond_label[0] =", labels_cond[0].item(), "  uncond_label[0] =", null_labels[0].item())
+        # print("   cond_label[0] =", labels_cond[0].item(), "  uncond_label[0] =", null_labels[0].item())
 
         cond_norm   = eps_cond.norm().item()
         uncond_norm = eps_uncond.norm().item()
         guid_norm   = eps_guided.norm().item()
-        print(f"[Step {i:02d}] λ={lamb:.2f}  ||ε_cond||={cond_norm:.3e}, ||ε_uncond||={uncond_norm:.3e}, ||ε_guided||={guid_norm:.3e}")
+        if i > 0 and i % 5 == 0:
+            logging.info(f"[Step {i:02d}] λ={lamb:.2f}  ||ε_cond||={cond_norm:.3e}, ||ε_uncond||={uncond_norm:.3e}, ||ε_guided||={guid_norm:.3e}")
+        # print(f"[Step {i:02d}] λ={lamb:.2f}  ||ε_cond||={cond_norm:.3e}, ||ε_uncond||={uncond_norm:.3e}, ||ε_guided||={guid_norm:.3e}")
 
         # 6) Predicted x₀ from zₜ
         x0_pred = (x - sqrt_nr * eps_guided) / sqrt_sr    # [B,3,H,W]
@@ -169,7 +171,8 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
             optim.step()
 
             if step % 100 == 0:
-                print(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
+                logging.info(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
+                # print(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
 
         ckpt = f"ddpm_epoch_{epoch}.pth"
         torch.save(net.state_dict(), ckpt)
@@ -183,7 +186,8 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
                 loss = cfg.get_loss(images, labels, scheduler=scheduler)
                 total_loss+=loss.item()
             total_loss/=step
-            print(f"[Eval] Epoch {epoch} | Loss {total_loss:.4f}") 
+            logging.info(f"[Eval] Epoch {epoch} | Loss {total_loss:.4f}")
+            # print(f"[Eval] Epoch {epoch} | Loss {total_loss:.4f}") 
 
         with torch.no_grad():
             sample_batch_size = 16
@@ -217,7 +221,7 @@ class CFG(nn.Module):
         min_lambda = -20,
         max_lambda = 20,
         guidance_coeff = 0.5,
-        uncondition_prob = 0.3, 
+        uncondition_prob = 0.1, 
         interpol_coef = 0.3,
         img_channels = 3,
         timesteps = 1000
@@ -326,7 +330,15 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=64, help='Batch Size')
     parser.add_argument('--base_lr', type=float, default=2e-4, help='Initial Learning Rate')
     parser.add_argument('--guidance_strength', type=float, default=0.5)
+    parser.add_argument('--file_name', type=str, default='log')
     args = parser.parse_args()
+
+    logging.basicConfig(
+        file_name = f"{args.file_name}.txt",
+        filemode='2',
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
 
     train_and_eval(img_size = args.image_size, 
                     batch_size=args.batch_size,
