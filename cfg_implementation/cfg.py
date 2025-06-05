@@ -115,8 +115,8 @@ def sample_ddim_cfg(
                 f"mean={x.mean():.3f}, std={x.std():.3f}, shape={x.shape}")
     # 10) Rescale to [0,1] and return
     samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0
-    print(f"After clamping -> samples.min={x.min():.3f}, max={x.max():.3f}, "
-                f"mean={x.mean():.3f}, std={x.std():.3f}, shape={x.shape}")
+    print(f"After clamping -> samples.min={samples.min():.3f}, max={samples.max():.3f}, "
+                f"mean={samples.mean():.3f}, std={samples.std():.3f}, shape={samples.shape}")
     
     return samples
 
