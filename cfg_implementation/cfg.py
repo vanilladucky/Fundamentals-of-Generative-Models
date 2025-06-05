@@ -114,6 +114,8 @@ def sample_ddim_cfg(
                 f"mean={x.mean():.3f}, std={x.std():.3f}, shape={x.shape}")
     # 10) Rescale to [0,1] and return
     samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0
+    print(f"After clamping -> samples.min={x.min():.3f}, max={x.max():.3f}, "
+                f"mean={x.mean():.3f}, std={x.std():.3f}, shape={x.shape}")
     
     return samples
 
@@ -220,8 +222,8 @@ class CFG(nn.Module):
         img_size, 
         batch_size,
         device,
-        min_lambda = -20,
-        max_lambda = 20,
+        min_lambda = -14,
+        max_lambda = 14,
         guidance_coeff = 0.5,
         uncondition_prob = 0.1, 
         interpol_coef = 0.3,
