@@ -337,7 +337,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(
         filename = f"{args.file_name}.txt",
-        filemode='2',
+        filemode='w',
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
