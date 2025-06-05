@@ -38,7 +38,7 @@ def sample_ddim_cfg(
     labels_cond: torch.LongTensor,
     shape=(16, 3, 32, 32),
     device="cuda:0",
-    num_ddim_steps: int = 200,
+    num_ddim_steps: int = 500,
     eta: float = 0.5,
     w: float = 1.0,
 ) -> torch.Tensor:
@@ -238,10 +238,6 @@ class CFG(nn.Module):
         self.min_lambda = min_lambda
         self.max_lambda = max_lambda
 
-        self.diffusion_step = torch.linspace(
-            min_lambda, max_lambda, timesteps, device=device,
-        )
-
         self.b = torch.arctan(
             torch.exp(torch.tensor(-max_lambda / 2, device=self.device))
         )
@@ -256,6 +252,7 @@ class CFG(nn.Module):
         )
     
     def sample_lambda(self, batch_size):
+        # Inspired by the discrete time cosine noise schedule 
         u = torch.rand(batch_size, device=self.device)  
         lamb = -2 * torch.log(torch.tan(self.a * u + self.b))  
         return lamb
