@@ -110,7 +110,8 @@ def sample_ddim_cfg(
         x = sqrt_sr_next * x0_pred + ddim_sigma * noise   # [B,3,H,W]
 
     # end for
-
+    print(f"samples.min={samples.min():.3f}, max={samples.max():.3f}, "
+                f"mean={samples.mean():.3f}, std={samples.std():.3f}, shape={samples.shape}")
     # 10) Rescale to [0,1] and return
     samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0
     
@@ -208,8 +209,6 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
             
             # samples = (samples.clamp(-1, 1) + 1) / 2.0  # now in [0,1]
             print(">> debug: sample‐tensor shape:", samples.shape) 
-            print(f"samples.min={samples.min():.3f}, max={samples.max():.3f}, "
-                f"mean={samples.mean():.3f}, std={samples.std():.3f}, shape={samples.shape}")
             grid = torchvision.utils.make_grid(samples, nrow=4)
             save_image(grid, f"./figures/samples_epoch_{epoch}.png")
 
