@@ -119,6 +119,7 @@ def sample_ddim_cfg(
 def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_lr = 0.01, guidance_str = 0.5):
     device = f'cuda:{device}' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
+    transforms.Resize((img_size, img_size)),
     transforms.ToTensor(), 
     transforms.Normalize(
         mean=(0.4914, 0.4822, 0.4465),
@@ -196,7 +197,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
                 sample_batch_size, dtype=torch.long, device=device
             )  # all “class 0” (airplane)
             samples = sample_ddim_cfg(
-                model=cfg,                     
+                model=cfg,                    
                 scheduler=scheduler,
                 labels_cond=sample_labels,
                 shape=(sample_batch_size, 3, img_size, img_size),
