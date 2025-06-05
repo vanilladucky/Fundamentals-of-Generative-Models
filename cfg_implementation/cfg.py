@@ -39,7 +39,7 @@ def sample_ddim_cfg(
     shape=(16, 3, 32, 32),
     device="cuda:0",
     num_ddim_steps: int = 256,
-    eta: float = 0.5,
+    eta: float = 0.3,
     w: float = 1.0,
 ) -> torch.Tensor:
 
