@@ -348,7 +348,7 @@ if __name__ == "__main__":
     parser.add_argument('--steps', type=int, default=1000, help='Number of time steps')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch Size')
     parser.add_argument('--base_lr', type=float, default=2e-4, help='Initial Learning Rate')
-    parser.add_argument('--guidance_strength', type=float, default=0.5)
+    parser.add_argument('--guidance_strength', type=float, default=0.1)
     parser.add_argument('--file_name', type=str, default='log')
     args = parser.parse_args()
 
