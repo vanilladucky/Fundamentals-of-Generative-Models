@@ -71,9 +71,10 @@ def sample_ddim_cfg(
         noise_ratio       = 1.0 - signal_ratio                        # 1−αₜ
         signal_ratio_next = model.lambda_to_signal_ratio(lamb_prev)   # α_{t+1}
 
-        sqrt_sr      = torch.sqrt(signal_ratio).view(-1,1,1,1)         # √αₜ
-        sqrt_nr      = torch.sqrt(noise_ratio).view(-1,1,1,1)          # √(1−αₜ)
-        sqrt_sr_next = torch.sqrt(signal_ratio_next).view(-1,1,1,1)    # √α_{t+1}
+        eps_for_stability = 1e-6
+        sqrt_sr      = torch.sqrt(signal_ratio.clamp(min=eps_for_stability)).view(-1,1,1,1)         # √αₜ
+        sqrt_nr      = torch.sqrt(noise_ratio.clamp(min=eps_for_stability)).view(-1,1,1,1)          # √(1−αₜ)
+        sqrt_sr_next = torch.sqrt(signal_ratio_next.clamp(min=eps_for_stability)).view(-1,1,1,1)    # √α_{t+1}
 
         # 5) Feed float λₜ into the network (no .long() cast)
         lamb_batch = torch.full((B,), fill_value=lamb.item(), device=device)  # [B] float
