@@ -316,15 +316,15 @@ class CFG(nn.Module):
         B = ori_image.size(0)
         device = ori_image.device
 
-        """inv_std = torch.tensor((0.2470,0.2435,0.2616), device=device).view(1,3,1,1)
+        inv_std = torch.tensor((0.2470,0.2435,0.2616), device=device).view(1,3,1,1)
         inv_mean = torch.tensor((0.4914,0.4822,0.4465), device=device).view(1,3,1,1)
         x0 = ori_image * inv_std + inv_mean     
         x0 = x0.clamp(0,1)
-        x0 = x0 * 2.0 - 1.0"""      
+        x0 = x0 * 2.0 - 1.0      
 
         lamb = self.sample_lambda(B) 
         eps = self.sample_noise(B)
-        x_t = self.perform_diffusion_process(ori_image, lamb, rand_noise=eps)                
+        x_t = self.perform_diffusion_process(x0, lamb, rand_noise=eps)                
 
         coin = torch.rand(B, device=device)
         use_null = coin < self.uncondition_prob

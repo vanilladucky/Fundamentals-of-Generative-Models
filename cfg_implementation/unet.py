@@ -11,7 +11,7 @@ class Swish(nn.Module):
 
 
 class TimeEmbedding(nn.Module):
-    def __init__(self, time_channels, max_lambda=20.0, min_lambda=-20.0, num_frequencies=64):
+    def __init__(self, time_channels, max_lambda=12.0, min_lambda=-12.0, num_frequencies=64):
         super().__init__()
         self.time_channels = time_channels
         self.num_frequencies = num_frequencies
