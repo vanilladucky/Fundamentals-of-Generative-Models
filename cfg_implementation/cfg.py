@@ -163,7 +163,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
 
     net = UNet(n_classes=10).to(device)
     cfg = CFG(net = net, img_size=img_size, batch_size=batch_size, device=device, timesteps=timesteps)
-    optim = torch.optim.Adam(net.parameters(), lr=base_lr)
+    optim = torch.optim.AdamW(net.parameters(), lr=base_lr)
     scheduler = SimpleDDPMScheduler(timesteps=timesteps, device=device).to(device)
 
     for epoch in range(epochs):
