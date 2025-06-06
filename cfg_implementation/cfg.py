@@ -249,7 +249,7 @@ def train_cfg(
         time_emb_dim=128,
         class_emb_dim=128,
         # If you want self‐attention at certain levels, set True there:
-        use_attn=[False, True, True, False],
+        use_attn=[False, False, False, False],
     ).to(device)
     trainer = CFGTrainer(
         model=unet,
