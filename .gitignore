@@ -2,3 +2,4 @@
 *.pth
 ddpm_ddim_implementation/data
 cfg_implementation/path/to/store/cifar10
+cfg_implementation/data
