@@ -14,7 +14,7 @@ import torchvision
 from torchvision.utils import save_image
 import argparse
 import logging
-from unet_v2 import UNet
+from unet import UNet
 import math
 
 @torch.no_grad()
