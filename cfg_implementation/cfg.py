@@ -14,7 +14,7 @@ import torchvision
 from torchvision.utils import save_image
 import argparse
 import logging
-from unet_v2 import Diffusion
+from unet_v2 import UNet
 import math
 
 @torch.no_grad()
@@ -241,7 +241,16 @@ def train_cfg(
     test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     # 2) Instantiate model + trainer
-    unet = Diffusion(min_lambda=min_lambda, max_lambda=max_lambda).to(device)
+    unet = UNet(
+        n_classes=10,
+        base_channels=64,
+        channel_mults=[1, 2, 4, 8],
+        n_res_blocks=2,
+        time_emb_dim=128,
+        class_emb_dim=128,
+        # If you want self‐attention at certain levels, set True there:
+        use_attn=[False, True, True, False],
+    ).to(device)
     trainer = CFGTrainer(
         model=unet,
         img_size=img_size,
