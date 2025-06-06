@@ -258,7 +258,7 @@ class CFG(nn.Module):
     def forward(self, noisy_image, diffusion_step, label='null'):
         # Feed through model
         return self.net(
-            noisy_image=noisy_image, diffusion_step=diffusion_step, label=label,
+            input=noisy_image, log_snrs=diffusion_step, cond=label,
         )
 
     def predict_noise(self, noisy_image, diffusion_step_idx, label):
