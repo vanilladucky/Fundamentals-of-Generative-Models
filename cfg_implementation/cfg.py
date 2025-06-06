@@ -18,92 +18,93 @@ from unet_v2 import Diffusion
 
 @torch.no_grad()
 def sample_ddim_cfg_from_scratch(
-    unet: nn.Module, 
-    labels_cond: torch.LongTensor, 
+    trainer: "CFGTrainer",               # ← pass the CFGTrainer instance
+    labels_cond: torch.LongTensor,      # tensor of shape (B,), with desired class indices
     shape=(16, 3, 32, 32),
     device="cuda:0",
     num_ddim_steps: int = 256,
-    eta: float = 0.0,      # η=0 → deterministic DDIM
-    w: float = 0.5,        # classifier-free guidance weight
+    eta: float = 0.0,      # η=0 → deterministic DDIM; >0 adds stochastic noise
+    w: float = 0.5,        # guidance weight
 ) -> torch.Tensor:
     """
-    Generates new images from pure Gaussian noise using Classifier-Free Guidance + DDIM.
-
-    unet: your Diffusion model (an instance of Diffusion), whose forward(z, λ, cond) → ε̂
-    labels_cond: (B,) tensor of desired class labels in [0..n_classes-1]
-    shape: the shape of generated images = (B, C, H, W)
-    device: 'cuda:0' or 'cpu'
-    num_ddim_steps: how many DDIM steps to run
-    eta: controls extra noise: η=0 is purely deterministic; η>0 injects noise each step
-    w: guidance weight (e.g. 0.1–1.5)
+    Generates new images from pure Gaussian noise, using Classifier‐Free Guidance + DDIM.
+    
+    - trainer: your CFGTrainer object (holds `trainer.model` = Diffusion UNet,
+               and methods like `trainer.lambda_to_alpha`).
+    - labels_cond: a (B,) tensor of class indices in [0..n_classes‐1]
+    - shape: (B, C, H, W) of the generated images
+    - num_ddim_steps: how many DDIM steps to run
+    - eta: controls stochasticity (0 ⇒ pure DDIM)
+    - w: guidance weight (e.g. 0.1–1.5)
     """
-    unet.eval()
+    trainer.model.eval()
     B = shape[0]
     device = torch.device(device)
+    n_classes = trainer.n_classes
 
-    # 1) Build strictly ascending λ sequence: λ₁ = min_lambda, λ_T = max_lambda
-    min_lambda = unet.min_lambda
-    max_lambda = unet.max_lambda
+    # 1) Build an ascending λ‐schedule:
+    min_lambda = trainer.min_lambda
+    max_lambda = trainer.max_lambda
     lambdas = torch.linspace(min_lambda, max_lambda, num_ddim_steps, device=device)
     lambdas_prev = torch.cat([lambdas[1:], torch.tensor([min_lambda], device=device)])
 
-    # 2) Initialize z₁ ← N(0,I)
+    # 2) Initialize z₁ ∈ ℝ^{B×C×H×W} as pure Gaussian noise:
     z = torch.randn(shape, device=device)
 
-    # 3) Prepare the unconditional (“null”) label:
-    #    For CIFAR-10, we used an embedding size of n_classes+1, so the “null index” = 10
-    null_label = torch.full((B,), fill_value=10, dtype=torch.long, device=device)
+    # 3) Prepare “unconditional” (null) labels for CFG:
+    null_labels = torch.full((B,), fill_value=n_classes, dtype=torch.long, device=device)
 
     eps_floor = 1e-6
-
     for i, λ in enumerate(lambdas):
         λ_prev = lambdas_prev[i]
 
-        # 4) Compute αₜ = sigmoid(λ), 1−αₜ, α_{t+1} = sigmoid(λ_prev)
-        alpha_t = unet.lambda_to_signal_ratio(λ).clamp(min=eps_floor, max=1.0 - eps_floor)        # scalar
-        one_minus_t = (1.0 - alpha_t).clamp(min=eps_floor)                                         # scalar
-        alpha_next = unet.lambda_to_signal_ratio(λ_prev).clamp(min=eps_floor, max=1.0 - eps_floor) # scalar
-        one_minus_next = (1.0 - alpha_next).clamp(min=eps_floor)                                    # scalar
+        # 4) Compute alphaₜ = sigmoid(λ), 1−alphaₜ, alpha_{t+1} = sigmoid(λ_prev):
+        alpha_t     = trainer.lambda_to_alpha(λ).clamp(min=eps_floor, max=1.0 - eps_floor)
+        one_minus_t = (1.0 - alpha_t).clamp(min=eps_floor)
+        alpha_next  = trainer.lambda_to_alpha(λ_prev).clamp(min=eps_floor, max=1.0 - eps_floor)
+        one_minus_next = (1.0 - alpha_next).clamp(min=eps_floor)
 
-        sqrt_alpha_t = torch.sqrt(alpha_t).view(1,1,1,1)          # [1,1,1,1]
-        sqrt_one_m_t = torch.sqrt(one_minus_t).view(1,1,1,1)      # [1,1,1,1]
-        sqrt_alpha_next = torch.sqrt(alpha_next).view(1,1,1,1)    # [1,1,1,1]
+        sqrt_alpha_t      = torch.sqrt(alpha_t).view(1, 1, 1, 1)       # [1,1,1,1]
+        sqrt_one_minus_t  = torch.sqrt(one_minus_t).view(1, 1, 1, 1)   # [1,1,1,1]
+        sqrt_alpha_next   = torch.sqrt(alpha_next).view(1, 1, 1, 1)    # [1,1,1,1]
 
-        # 5) Build a (B,) float tensor filled with current λ so the U-Net sees λₜ
+        # 5) Build a (B,) float‐tensor filled with current λ (so the network sees λₜ):
         λ_batch = torch.full((B,), fill_value=λ.item(), device=device)  # [B]
 
-        # 6) Query the U-Net for conditional + unconditional noise predictions:
-        ε_cond   = unet(z, λ_batch, labels_cond)   # [B,C,H,W]
-        ε_uncond = unet(z, λ_batch, null_label)     # [B,C,H,W]
-        ε_guided = (1.0 + w) * ε_cond - w * ε_uncond # [B,C,H,W]
+        # 6) Query the UNet for conditional + unconditional noise:
+        #    Diffusion.forward(z, λ_batch, cond) returns predicted noise ε̂
+        eps_cond   = trainer.model(z, λ_batch, labels_cond)   # [B,3,H,W]
+        eps_uncond = trainer.model(z, λ_batch, null_labels)   # [B,3,H,W]
+        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond    # [B,3,H,W]
 
-        # 7) Compute x₀_pred = (zₜ − √(1−αₜ)·ε̃ₜ) / √(αₜ)
-        x0_pred = (z - sqrt_one_m_t * ε_guided) / sqrt_alpha_t  # [B,C,H,W]
+        # 7) Compute x₀_pred from zₜ and ε̃ₜ:
+        #    x₀_pred = (zₜ − √(1−αₜ)·ε̃ₜ) / √(αₜ)
+        x0_pred = (z - sqrt_one_minus_t * eps_guided) / sqrt_alpha_t  # [B,3,H,W]
 
-        # 8) If this is the last DDIM step, set z ← x₀_pred and break
+        # 8) If this is the final step, set z ← x₀_pred and break:
         if i == num_ddim_steps - 1:
             z = x0_pred
             break
 
-        # 9) Otherwise, compute the DDIM σₜ term:
-        termA = one_minus_next / one_minus_t   # scalar
-        termB = (alpha_next - alpha_t) / alpha_next  # scalar
-        σ_t_squared = (termA * termB).clamp(min=0.0)   # scalar ≥ 0
-        σ_t = (eta * torch.sqrt(σ_t_squared)).view(1,1,1,1)  # [1,1,1,1]
+        # 9) Otherwise, compute DDIM σₜ:
+        termA = one_minus_next / one_minus_t                  # scalar
+        termB = (alpha_next - alpha_t) / alpha_next            # scalar
+        sigma_squared = (termA * termB).clamp(min=0.0)          # scalar ≥0
+        ddim_sigma = (eta * torch.sqrt(sigma_squared)).view(1, 1, 1, 1)  # [1,1,1,1]
 
-        # 10) Sample extra noise if η > 0
+        # 10) Sample extra noise if η > 0:
         if eta > 0.0:
             noise = torch.randn_like(z)
         else:
             noise = torch.zeros_like(z)
 
-        # 11) DDIM update: z_{t+1} = √α_{t+1} · x₀_pred + σₜ · noise
-        z = sqrt_alpha_next * x0_pred + σ_t * noise
+        # 11) DDIM update: z_{t+1} = √(α_{t+1})·x₀_pred + σₜ · noise
+        z = sqrt_alpha_next * x0_pred + ddim_sigma * noise
 
     # end for
 
-    # 12) Clamp z to [−1, +1] and move to [0,1]
-    samples = (z.clamp(-1.0, 1.0) + 1.0) / 2.0  # [B,3,H,W] in [0,1]
+    # 12) Finally, z ∈ [−1, +1]. Clamp & map to [0,1]:
+    samples = (z.clamp(-1.0, 1.0) + 1.0) / 2.0
     return samples
 
 class CFGTrainer:
@@ -301,7 +302,7 @@ def train_cfg(
                 labels_cond = torch.full((B,), fill_value=desired_class, device=device)
 
                 new_samples = sample_ddim_cfg_from_scratch(
-                    unet=trainer.model,
+                    trainer=trainer,
                     labels_cond=labels_cond,
                     shape=(B, 3, img_size, img_size),
                     device=device,
