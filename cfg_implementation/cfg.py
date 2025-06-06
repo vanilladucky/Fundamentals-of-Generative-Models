@@ -136,7 +136,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
         pin_memory=True
     )
 
-    net = Diffusion().to(device)
+    net = UNet().to(device)
     cfg = CFG(net = net, img_size=img_size, batch_size=batch_size, device=device, timesteps=timesteps)
     optim = torch.optim.AdamW(net.parameters(), lr=base_lr)
 
@@ -258,7 +258,7 @@ class CFG(nn.Module):
     def forward(self, noisy_image, diffusion_step, label='null'):
         # Feed through model
         return self.net(
-            input=noisy_image, log_snrs=diffusion_step, cond=label,
+            noisy_image=noisy_image, diffusion_step=diffusion_step, label=label,
         )
 
     def predict_noise(self, noisy_image, diffusion_step_idx, label):
