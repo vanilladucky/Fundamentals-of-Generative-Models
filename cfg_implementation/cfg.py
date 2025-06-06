@@ -301,7 +301,7 @@ def train_cfg(
                 labels_cond = torch.full((B,), fill_value=desired_class, device=device)
 
                 new_samples = sample_ddim_cfg_from_scratch(
-                    model=trainer.model,
+                    unet=trainer.model,
                     labels_cond=labels_cond,
                     shape=(B, 3, img_size, img_size),
                     device=device,
