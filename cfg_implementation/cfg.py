@@ -145,7 +145,7 @@ def train_cfg(
     test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     # 2) Instantiate model + trainer
-    unet = Diffusion(n_classes=10).to(device)
+    unet = Diffusion().to(device)
     trainer = CFGTrainer(
         model=unet,
         img_size=img_size,
