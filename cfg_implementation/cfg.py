@@ -15,6 +15,7 @@ from torchvision.utils import save_image
 import argparse
 import logging
 from unet_v2 import Diffusion
+import math
 
 @torch.no_grad()
 def sample_ddim_cfg_from_scratch(
@@ -134,6 +135,8 @@ class CFGTrainer:
         self.uncond_prob = uncond_prob
         self.min_lambda = min_lambda
         self.max_lambda = max_lambda
+        self._b = math.atan(math.exp(-self.max_lambda / 2.0))
+        self._a = math.atan(math.exp(-self.min_lambda / 2.0)) - self._b
 
         # Precompute a, b constants for inverse CF‐cosine schedule if you want,
         # but here we’ll simply invert “uniform u → λ” directly.
@@ -142,11 +145,11 @@ class CFGTrainer:
         # If you prefer the “cosine schedule inversion,” you can replace sample_lambda() accordingly.
 
     def sample_lambda(self, batch_size: int) -> torch.Tensor:
-        """
-        Sample λ uniformly in [min_lambda, max_lambda] for each example.
-        (This corresponds roughly to sampling log‐SNR from a wide range.)
-        """
-        return torch.rand(batch_size, device=self.device) * (self.max_lambda - self.min_lambda) + self.min_lambda
+        u = torch.rand(batch_size, device=self.device)
+
+        lamb = -2.0 * torch.log(torch.tan(self._a * u + self._b))
+
+        return lamb
 
     def lambda_to_alpha(self, lamb: torch.Tensor) -> torch.Tensor:
         """
@@ -306,7 +309,7 @@ def train_cfg(
                     labels_cond=labels_cond,
                     shape=(B, 3, img_size, img_size),
                     device=device,
-                    num_ddim_steps=256,
+                    num_ddim_steps=1000,
                     eta=0.0,          
                     w=guidance_str
                 )
