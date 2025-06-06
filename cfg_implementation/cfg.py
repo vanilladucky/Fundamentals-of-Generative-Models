@@ -123,6 +123,7 @@ def train_cfg(
     device: str = "cuda",
     save_every: int = 10,
     out_dir: str = "./checkpoints",
+    guidance_str = 0.7, 
 ):
     """
     A standalone training loop for classifier-free guidance.
@@ -204,6 +205,7 @@ def train_cfg(
         if epoch % save_every == 0:
             # Take a fixed batch of test images to visualize denoising
             sample_imgs, sample_labels = next(iter(test_loader))
+            print(sample_labels)
             sample_imgs = sample_imgs[:16].to(device)    # pick 16 images
             sample_labels = sample_labels[:16].to(device)
 
@@ -217,7 +219,7 @@ def train_cfg(
                 eps_cond   = unet(z_lambda, lamb, sample_labels)
                 eps_uncond = unet(z_lambda, lamb, torch.full_like(sample_labels, 10))
                 # Interpolate guided noise
-                w = 0.5  # same as uncond_prob or your chosen guidance weight
+                w = guidance_str  # same as uncond_prob or your chosen guidance weight
                 eps_guided = (1.0 + w) * eps_cond - w * eps_uncond
                 # Single DDIM-style step: reconstruct x0
                 alpha = torch.sigmoid(lamb).view(-1,1,1,1)
@@ -253,6 +255,7 @@ if __name__ == "__main__":
     parser.add_argument("--device",        type=str,   default="cuda",help="“cuda” or “cpu”")
     parser.add_argument("--save_every",    type=int,   default=10,    help="Save checkpoint every N epochs")
     parser.add_argument("--out_dir",       type=str,   default="./checkpoints", help="Where to save checkpoints")
+    parser.add_argument("--guide",         type=float, default=0.7,   help="Guidance strength for inference")
     args = parser.parse_args()
 
     import os
@@ -270,4 +273,5 @@ if __name__ == "__main__":
         device=args.device,
         save_every=args.save_every,
         out_dir=args.out_dir,
+        guidance_str=args.guide
     )
