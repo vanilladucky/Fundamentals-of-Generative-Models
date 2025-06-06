@@ -154,8 +154,8 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
                 logging.info(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
                 print(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
 
-        ckpt = f"ddpm_epoch_{epoch}.pth"
-        torch.save(net.state_dict(), ckpt)
+        #ckpt = f"ddpm_epoch_{epoch}.pth"
+        #torch.save(net.state_dict(), ckpt)
 
         with torch.no_grad():
             net.eval()
@@ -186,9 +186,9 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
             logging.info(f"Saving: min={samples.min().item():.3f}, "
                  f"max={samples.max().item():.3f}, mean={samples.mean().item():.3f}, std={samples.std().item():.3f}")
             grid = torchvision.utils.make_grid(samples, nrow=4)
-            save_image(grid, f"./figures/samples_epoch_{epoch}.png")
-
-            print(f"[Sample] Saved sample grid for epoch {epoch} → samples_epoch_{epoch}.png")
+            if epoch > 0 and epoch%10==0:
+                save_image(grid, f"./figures/samples_epoch_{epoch}.png")
+                print(f"[Sample] Saved sample grid for epoch {epoch} → samples_epoch_{epoch}.png")
 
 class CFG(nn.Module):
     def __init__(self,
