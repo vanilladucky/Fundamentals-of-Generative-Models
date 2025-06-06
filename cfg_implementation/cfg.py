@@ -233,7 +233,7 @@ def train_cfg(
                 logging.info(f"Saved sample grid at epoch {epoch:03d}")
 
         # ─── Save model checkpoint ───────────────────────────────────────────
-        if epoch % save_every == 0:
+        if epoch % 100 == 0:
             ckpt_path = f"{out_dir}/unet_epoch_{epoch:03d}.pth"
             torch.save(unet.state_dict(), ckpt_path)
             logging.info(f"Saved model checkpoint: {ckpt_path}")
