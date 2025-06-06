@@ -16,313 +16,258 @@ import argparse
 import logging
 from unet_v2 import Diffusion
 
-@torch.no_grad()
-def sample_ddim_cfg(
-    model,
-    labels_cond: torch.LongTensor,
-    shape=(16, 3, 32, 32),
-    device="cuda:0",
-    num_ddim_steps: int = 256,
-    eta: float = 0.3,
-    w: float = 0.1,
-) -> torch.Tensor:
-
-    model.eval()
-    B = shape[0]
-    device = torch.device(device)
-
-    min_lambda = model.min_lambda
-    max_lambda = model.max_lambda
-
-    lambdas = torch.linspace(min_lambda, max_lambda, num_ddim_steps, device=device)
-    lambdas_prev = torch.cat([lambdas[1:], torch.tensor([min_lambda], device=device)])
-
-    x = torch.randn(shape, device=device)
-
-    null_labels = torch.full((B,), fill_value=model.n_classes, dtype=torch.long, device=device)
-
-    eps_floor = 1e-6  
-
-    for i, lamb in enumerate(lambdas):
-        lamb_prev = lambdas_prev[i]
-
-        alpha_t = model.lambda_to_signal_ratio(lamb).clamp(min=eps_floor, max=1.0 - eps_floor)       
-        one_minus_t = (1.0 - alpha_t).clamp(min=eps_floor)                                         
-        alpha_next = model.lambda_to_signal_ratio(lamb_prev).clamp(min=eps_floor, max=1.0 - eps_floor)  
-        one_minus_next = (1.0 - alpha_next).clamp(min=eps_floor)                                     
-
-        sqrt_sr      = torch.sqrt(alpha_t).view(-1, 1, 1, 1)        
-        sqrt_nr      = torch.sqrt(one_minus_t).view(-1, 1, 1, 1)     
-        sqrt_sr_next = torch.sqrt(alpha_next).view(-1, 1, 1, 1)      
-
-        lamb_batch = torch.full((B,), fill_value=lamb.item(), device=device)  
-
-        eps_cond   = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=labels_cond) 
-        eps_uncond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=null_labels) 
-        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond                         
-
-        """if i > 0 and i % 5 == 0:
-            logging.info(f"[Step {i:03d}] λ={lamb:.2f}  "
-                         f"||ε_cond||={eps_cond.norm().item():.3e}, "
-                         f"||ε_uncond||={eps_uncond.norm().item():.3e}, "
-                         f"||ε_guided||={eps_guided.norm().item():.3e}")"""
-
-        
-        x0_pred = (x - sqrt_nr * eps_guided) / sqrt_sr  
-
-        if i == num_ddim_steps - 1:
-            x = x0_pred
-            break
-
-        termA = one_minus_next / one_minus_t                   
-        termB = (alpha_next - alpha_t) / alpha_next            
-        ddim_sigma_sq = (termA * termB).clamp(min=0.0)         
-        ddim_sigma    = (eta * torch.sqrt(ddim_sigma_sq)).view(-1, 1, 1, 1)  
-
-        if eta > 0.0:
-            noise = torch.randn_like(x)
-        else:
-            noise = torch.zeros_like(x)
-
-        x = sqrt_sr_next * x0_pred + ddim_sigma * noise      
-
-    logging.info(f"RAW x before clamp: min={x.min().item():.3f}, "
-                 f"max={x.max().item():.3f}, mean={x.mean().item():.3f}, std={x.std().item():.3f}")
-
-    samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0 
-    logging.info(f"After clamp: samples.min={samples.min().item():.3f}, "
-                 f"max={samples.max().item():.3f}, mean={samples.mean().item():.3f}, std={samples.std().item():.3f}")
-
-    return samples
-
-def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_lr = 0.01, guidance_str = 0.5):
-    device = f'cuda:{device}' if torch.cuda.is_available() else 'cpu'
-    transform = transforms.Compose([
-    transforms.Resize((img_size, img_size)),
-    transforms.ToTensor(), 
-    transforms.Normalize(
-        mean=(0.4914, 0.4822, 0.4465),
-        std=(0.2470, 0.2435, 0.2616)
-        ),
-    ])
-
-    train_dataset = datasets.CIFAR10(
-        root="path/to/store/cifar10",
-        train=True,
-        download=True,
-        transform=transform
-    )
-
-    test_dataset = datasets.CIFAR10(
-        root="path/to/store/cifar10",
-        train=False,
-        download=True,
-        transform=transform
-    )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=4,       
-        pin_memory=True     
-    )
-
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
-    )
-
-    net = UNet(n_classes=10).to(device)
-    cfg = CFG(net = net, img_size=img_size, batch_size=batch_size, device=device, timesteps=timesteps)
-    optim = torch.optim.AdamW(net.parameters(), lr=base_lr)
-
-    for epoch in range(epochs):
-        net.train()
-        for step, (img,labels) in enumerate(train_loader):
-            images = img.to(device)        
-            labels = labels.to(device) 
-            loss = cfg.get_loss(ori_image=images, true_label=labels)
-            optim.zero_grad()
-            loss.backward()
-            optim.step()
-
-            if step % 200 == 0:
-                logging.info(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
-                print(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
-
-        #ckpt = f"ddpm_epoch_{epoch}.pth"
-        #torch.save(net.state_dict(), ckpt)
-
-        with torch.no_grad():
-            net.eval()
-            total_loss = 0
-            for step, (img, labels) in enumerate(test_loader):
-                images = img.to(device)
-                labels = labels.to(device)
-                loss = cfg.get_loss(images, labels)
-                total_loss+=loss.item()
-            total_loss/=step
-            logging.info(f"[Eval] Epoch {epoch} | Loss {total_loss:.4f}")
-            print(f"[Eval] Epoch {epoch} | Loss {total_loss:.4f}") 
-
-        with torch.no_grad():
-            sample_batch_size = 16
-            sample_labels = torch.zeros(
-                sample_batch_size, dtype=torch.long, device=device
-            )  # all “class 0” (airplane)
-            samples = sample_ddim_cfg(
-                model=cfg,                    
-                labels_cond=sample_labels,
-                shape=(sample_batch_size, 3, img_size, img_size),
-                device=device,
-                eta=0.5,       
-                w = guidance_str                
-            )
-            
-            logging.info(f"Saving: min={samples.min().item():.3f}, "
-                 f"max={samples.max().item():.3f}, mean={samples.mean().item():.3f}, std={samples.std().item():.3f}")
-            grid = torchvision.utils.make_grid(samples, nrow=4)
-            if epoch > 0 and epoch%10==0:
-                save_image(grid, f"./figures/samples_epoch_{epoch}.png")
-                print(f"[Sample] Saved sample grid for epoch {epoch} → samples_epoch_{epoch}.png")
-
-class CFG(nn.Module):
-    def __init__(self,
-        net, 
-        img_size, 
-        batch_size,
-        device,
-        min_lambda = -12,
-        max_lambda = 12,
-        guidance_coeff = 0.5,
-        uncondition_prob = 0.1, 
-        interpol_coef = 0.3,
-        img_channels = 3,
-        timesteps = 1000
+class CFGTrainer:
+    """
+    A helper that encapsulates:
+      - noise schedule (λ ↔ alpha/√(alpha))
+      - sampling λ at each batch
+      - performing the “diffusion forward” z_λ = √alpha(λ) · x0 + √(1-alpha(λ)) · ε
+      - randomly dropping labels with probability uncond_prob
+      - computing MSE between predicted ε and true ε
+    """
+    def __init__(
+        self,
+        model: nn.Module,
+        img_size: int,
+        n_classes: int,
+        device: torch.device,
+        uncond_prob: float = 0.1,
+        min_lambda: float = -12.0,
+        max_lambda: float = 12.0,
     ):
-
         super().__init__()
-
-        self.net = net.to(device)
+        self.model = model.to(device)
         self.img_size = img_size
-        self.batch_size = batch_size
-        self.guidance_str = guidance_coeff
-        self.uncondition_prob = uncondition_prob
-        self.interpol_coef = interpol_coef
-        self.img_channels = img_channels
-        self.timesteps = timesteps
-        self.device = torch.device(device)
-        self.n_classes = 10
+        self.n_classes = n_classes
+        self.device = device
+        self.uncond_prob = uncond_prob
         self.min_lambda = min_lambda
         self.max_lambda = max_lambda
 
-        self.b = torch.arctan(
-            torch.exp(torch.tensor(-max_lambda / 2, device=self.device))
-        )
-        self.a = torch.arctan(
-            torch.exp(torch.tensor(-min_lambda / 2, device=self.device))
-        ) - self.b
+        # Precompute a, b constants for inverse CF‐cosine schedule if you want,
+        # but here we’ll simply invert “uniform u → λ” directly.
+        # (As in your earlier code, you had: u ~ Uniform(0,1), λ = -2 * log(tan(a*u + b)).
+        #  But for simplicity, we’ll just sample λ ~ Uniform(min_lambda, max_lambda) each batch.)
+        # If you prefer the “cosine schedule inversion,” you can replace sample_lambda() accordingly.
 
-    def sample_noise(self, batch_size): 
-        return torch.randn(
-            size=(batch_size, self.img_channels, self.img_size, self.img_size),
-            device=self.device,
-        )
-    
-    def sample_lambda(self, batch_size):
-        # Inspired by the discrete time cosine noise schedule 
-        u = torch.rand(batch_size, device=self.device)  
-        lamb = -2 * torch.log(torch.tan(self.a * u + self.b))  
-        return lamb
+    def sample_lambda(self, batch_size: int) -> torch.Tensor:
+        """
+        Sample λ uniformly in [min_lambda, max_lambda] for each example.
+        (This corresponds roughly to sampling log‐SNR from a wide range.)
+        """
+        return torch.rand(batch_size, device=self.device) * (self.max_lambda - self.min_lambda) + self.min_lambda
 
-    def lambda_to_signal_ratio(self, lamb):
-        return 1 / (1 + torch.exp(-lamb))
+    def lambda_to_alpha(self, lamb: torch.Tensor) -> torch.Tensor:
+        """
+        Convert λ → alpha = sigmoid(λ). Ensures alpha ∈ (0,1).
+        """
+        return torch.sigmoid(lamb)
 
-    def signal_ratio_to_noise_ratio(self, signal_ratio):
-        return 1 - signal_ratio
+    def diffusion_forward(self, x0: torch.Tensor, lamb: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
+        """
+        Given a clean image x0 ∈ [-1,1], a λ (log‐SNR), and noise ε ~ N(0,I),
+        compute z_λ = √alpha(λ) · x0 + √(1 - alpha(λ)) · ε.
 
-    def perform_diffusion_process(self, ori_image, lamb, rand_noise=None):
-        lamb_clamped = lamb.clamp(self.min_lambda, self.max_lambda)
-        signal_ratio = self.lambda_to_signal_ratio(lamb)      
-        noise_ratio  = 1 - signal_ratio                        
-        sqrt_sr = signal_ratio.sqrt().view(-1,1,1,1)           
-        sqrt_nr = noise_ratio.sqrt().view(-1,1,1,1)            
-        if rand_noise is None:
-            rand_noise = self.sample_noise(batch_size=ori_image.size(0))
-        return sqrt_sr * ori_image + sqrt_nr * rand_noise # Equation (6) - z_lambda
+        x0:   [B, 3, H, W], in [-1,1]
+        lamb: [B] float
+        noise:[B, 3, H, W] normal
+        """
+        alpha = self.lambda_to_alpha(lamb)                 # [B]
+        sigma_squared = 1.0 - alpha                                   # [B]
+        sqrt_alpha = torch.sqrt(alpha).view(-1, 1, 1, 1)       # [B,1,1,1]
+        sqrt_σ = torch.sqrt(sigma_squared).view(-1, 1, 1, 1)      # [B,1,1,1]
+        return sqrt_alpha * x0 + sqrt_σ * noise            # [B,3,H,W]
 
-    def forward(self, noisy_image, diffusion_step, label='null'):
-        # Feed through model
-        return self.net(
-            noisy_image=noisy_image, diffusion_step=diffusion_step, label=label,
-        )
+    def compute_loss(self, clean_imgs: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """
+        Perform one forward pass and compute the MSE loss:
+        1) Sample λ, sample ε
+        2) z_λ = forward diffusion
+        3) With prob uncond_prob, drop label → use “null index” in model
+        4) Model predicts ε̂ = model(z_λ, λ, cond_label)
+        5) return F.mse_loss(ε̂, ε)
+        """
+        B = clean_imgs.size(0)
+        clean_imgs = clean_imgs.to(self.device)       # expected ∈ [-1,1] already
+        labels = labels.to(self.device)
 
-    def predict_noise(self, noisy_image, diffusion_step_idx, label):
-        # Run it through forward()
-        pred_noise_cond = self(
-            noisy_image=noisy_image, diffusion_step=diffusion_step_idx, label=label,
-        )
-        # Run it through forward()
-        pred_noise_uncond = self(
-            noisy_image=noisy_image, diffusion_step=diffusion_step_idx, label=torch.full((label.shape[0],), 10, dtype=torch.long, device=self.device),
-        )
-        return (1 + self.guidance_str) * pred_noise_cond - self.guidance_str * pred_noise_uncond
+        # 1) Sample λ and ε
+        lamb = self.sample_lambda(B)                  # [B]
+        eps = torch.randn_like(clean_imgs)            # [B,3,H,W]
 
-    def get_loss(self, ori_image: torch.Tensor, true_label: torch.LongTensor):
-        B = ori_image.size(0)
-        device = ori_image.device
+        # 2) Compute z_λ
+        z_lambda = self.diffusion_forward(clean_imgs, lamb, eps)  # [B,3,H,W]
 
-        inv_std = torch.tensor((0.2470,0.2435,0.2616), device=device).view(1,3,1,1)
-        inv_mean = torch.tensor((0.4914,0.4822,0.4465), device=device).view(1,3,1,1)
-        x0 = ori_image * inv_std + inv_mean     
-        x0 = x0.clamp(0,1)
-        x0 = x0 * 2.0 - 1.0      
+        # 3) Randomly drop cond labels with probability uncond_prob
+        coin = torch.rand(B, device=self.device)
+        use_null = coin < self.uncond_prob
+        null_labels = torch.full_like(labels, fill_value=self.n_classes)  # “null” index
+        cond_labels = torch.where(use_null, null_labels, labels)          # [B]
 
-        lamb = self.sample_lambda(B) 
-        eps = self.sample_noise(B)
-        x_t = self.perform_diffusion_process(x0, lamb, rand_noise=eps)                
+        # 4) Predict noise
+        eps_pred = self.model(z_lambda, lamb, cond_labels)                # [B,3,H,W]
 
-        coin = torch.rand(B, device=device)
-        use_null = coin < self.uncondition_prob
-        null_labels = torch.full_like(true_label, fill_value=self.n_classes)
-        cond_labels = torch.where(use_null, null_labels, true_label)  
-
-        pred_noise = self.predict_noise(
-            noisy_image=x_t,                      
-            diffusion_step_idx=lamb,             
-            label=cond_labels                     
-        )
-
-        loss = F.mse_loss(pred_noise, eps, reduction="mean")
+        # 5) MSE loss against true ε
+        loss = F.mse_loss(eps_pred, eps, reduction="mean")
         return loss
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--cuda', type=int, default=0, help='CUDA device number (e.g., 0, 1, etc.)')
-    parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs')
-    parser.add_argument('--image_size', type=int, default=32, help='Dimension of image')
-    parser.add_argument('--steps', type=int, default=1000, help='Number of time steps')
-    parser.add_argument('--batch_size', type=int, default=64, help='Batch Size')
-    parser.add_argument('--base_lr', type=float, default=2e-4, help='Initial Learning Rate')
-    parser.add_argument('--guidance_strength', type=float, default=0.1)
-    parser.add_argument('--file_name', type=str, default='log')
-    args = parser.parse_args()
 
-    logging.basicConfig(
-        filename = f"{args.file_name}.txt",
-        filemode='w',
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+def train_cfg(
+    img_size: int = 32,
+    batch_size: int = 128,
+    epochs: int = 200,
+    base_lr: float = 2e-4,
+    uncond_prob: float = 0.1,
+    min_lambda: float = -12.0,
+    max_lambda: float = 12.0,
+    device: str = "cuda",
+    save_every: int = 10,
+    out_dir: str = "./checkpoints",
+):
+    """
+    A standalone training loop for classifier-free guidance.
+    Trains on CIFAR-10. Saves model checkpoints every `save_every` epochs.
+    """
+    torch.manual_seed(42)
+    device = torch.device(device if torch.cuda.is_available() else "cpu")
+
+    # 1) Data (range [0,1] → normalize to [-1,1])
+    transform = transforms.Compose([
+        transforms.Resize((img_size, img_size)),
+        transforms.ToTensor(),  # [0,1]
+        transforms.Normalize(mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5)),  # [-1,1]
+    ])
+
+    train_ds = datasets.CIFAR10(root="./data", train=True, download=True, transform=transform)
+    test_ds  = datasets.CIFAR10(root="./data", train=False, download=True, transform=transform)
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=4, pin_memory=True)
+    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+    # 2) Instantiate model + trainer
+    unet = Diffusion(n_classes=10).to(device)
+    trainer = CFGTrainer(
+        model=unet,
+        img_size=img_size,
+        n_classes=10,
+        device=device,
+        uncond_prob=uncond_prob,
+        min_lambda=min_lambda,
+        max_lambda=max_lambda,
     )
 
-    train_and_eval(img_size = args.image_size, 
-                    batch_size=args.batch_size,
-                    device = args.cuda,
-                    timesteps = args.steps,
-                    epochs = args.epochs,
-                    base_lr = args.base_lr,
-                    guidance_str = args.guidance_strength)
+    optimizer = torch.optim.AdamW(unet.parameters(), lr=base_lr)
+
+    # 3) Logging setup
+    logging.basicConfig(
+        filename="cfg_training.log",
+        filemode="w",
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+    logging.info("Starting CFG training")
+
+    # 4) Training + evaluation loop
+    for epoch in range(1, epochs + 1):
+        unet.train()
+        running_loss = 0.0
+        pbar = tqdm(train_loader, desc=f"[Epoch {epoch:03d}/{epochs:03d}] Train", leave=False)
+        for imgs, labels in pbar:
+            imgs = imgs.to(device)    # in [-1, 1]
+            labels = labels.to(device)
+
+            loss = trainer.compute_loss(imgs, labels)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+            pbar.set_postfix_str(f"loss={loss.item():.4f}")
+
+        avg_train_loss = running_loss / len(train_loader)
+        logging.info(f"Epoch {epoch:03d} | Train loss: {avg_train_loss:.5f}")
+        print(f"[Epoch {epoch:03d}] Train loss: {avg_train_loss:.5f}")
+
+        # ─── Simple evaluation: compute average loss on test set ────────────
+        unet.eval()
+        test_loss = 0.0
+        with torch.no_grad():
+            for imgs, labels in test_loader:
+                imgs = imgs.to(device)
+                labels = labels.to(device)
+                loss_t = trainer.compute_loss(imgs, labels)
+                test_loss += loss_t.item()
+        avg_test_loss = test_loss / len(test_loader)
+        logging.info(f"Epoch {epoch:03d} | Test  loss: {avg_test_loss:.5f}")
+        print(f"[Epoch {epoch:03d}] Test  loss: {avg_test_loss:.5f}")
+
+        if epoch % save_every == 0:
+            # Take a fixed batch of test images to visualize denoising
+            sample_imgs, sample_labels = next(iter(test_loader))
+            sample_imgs = sample_imgs[:16].to(device)    # pick 16 images
+            sample_labels = sample_labels[:16].to(device)
+
+            # Sample a new random noise vector and λ, then do one forward-diffusion plus one step of denoising
+            with torch.no_grad():
+                B = sample_imgs.size(0)
+                lamb = torch.full((B,), fill_value=max_lambda, device=device)  # extreme noise
+                eps = torch.randn_like(sample_imgs)
+                z_lambda = trainer.diffusion_forward(sample_imgs, lamb, eps)
+                # Predict noise with CFG (here cond=sample_labels, uncond=“null index”)
+                eps_cond   = unet(z_lambda, lamb, sample_labels)
+                eps_uncond = unet(z_lambda, lamb, torch.full_like(sample_labels, 10))
+                # Interpolate guided noise
+                w = 0.5  # same as uncond_prob or your chosen guidance weight
+                eps_guided = (1.0 + w) * eps_cond - w * eps_uncond
+                # Single DDIM-style step: reconstruct x0
+                alpha = torch.sigmoid(lamb).view(-1,1,1,1)
+                one_minus = 1.0 - alpha
+                sqrt_alpha = torch.sqrt(alpha)
+                x0_pred = (z_lambda - torch.sqrt(one_minus) * eps_guided) / sqrt_alpha
+                x0_pred = x0_pred.clamp(-1,1)
+
+                # Map back to [0,1] for saving
+                samples_to_save = (x0_pred + 1.0) * 0.5
+                grid = torchvision.utils.make_grid(samples_to_save, nrow=4)
+                save_image(grid, f"./figures/epoch_{epoch:03d}_samples.png")
+                logging.info(f"Saved sample grid at epoch {epoch:03d}")
+
+        # ─── Save model checkpoint ───────────────────────────────────────────
+        if epoch % save_every == 0:
+            ckpt_path = f"{out_dir}/unet_epoch_{epoch:03d}.pth"
+            torch.save(unet.state_dict(), ckpt_path)
+            logging.info(f"Saved model checkpoint: {ckpt_path}")
+
+    print("Training complete!")
+
+# ─── Entry point ───────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--image_size",    type=int,   default=32,    help="Training image size")
+    parser.add_argument("--batch_size",    type=int,   default=128,   help="Batch size")
+    parser.add_argument("--epochs",        type=int,   default=200,   help="Number of epochs")
+    parser.add_argument("--lr",            type=float, default=2e-4,  help="Base learning rate")
+    parser.add_argument("--uncond_prob",   type=float, default=0.1,   help="Probability of dropping label (CFG)")
+    parser.add_argument("--min_lambda",    type=float, default=-12.0, help="Min λ for sampling log‐SNR")
+    parser.add_argument("--max_lambda",    type=float, default=12.0,  help="Max λ for sampling log‐SNR")
+    parser.add_argument("--device",        type=str,   default="cuda",help="“cuda” or “cpu”")
+    parser.add_argument("--save_every",    type=int,   default=10,    help="Save checkpoint every N epochs")
+    parser.add_argument("--out_dir",       type=str,   default="./checkpoints", help="Where to save checkpoints")
+    args = parser.parse_args()
+
+    import os
+    os.makedirs("./figures", exist_ok=True)
+    os.makedirs(args.out_dir, exist_ok=True)
+
+    train_cfg(
+        img_size=args.image_size,
+        batch_size=args.batch_size,
+        epochs=args.epochs,
+        base_lr=args.lr,
+        uncond_prob=args.uncond_prob,
+        min_lambda=args.min_lambda,
+        max_lambda=args.max_lambda,
+        device=args.device,
+        save_every=args.save_every,
+        out_dir=args.out_dir,
+    )
