@@ -52,7 +52,7 @@ def sample_ddim_cfg_from_scratch(
 
     # 3) Prepare the unconditional (“null”) label:
     #    For CIFAR-10, we used an embedding size of n_classes+1, so the “null index” = 10
-    null_label = torch.full((B,), fill_value=unet.n_classes, dtype=torch.long, device=device)
+    null_label = torch.full((B,), fill_value=10, dtype=torch.long, device=device)
 
     eps_floor = 1e-6
 
