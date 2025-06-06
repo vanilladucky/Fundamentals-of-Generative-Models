@@ -124,6 +124,7 @@ def train_cfg(
     save_every: int = 10,
     out_dir: str = "./checkpoints",
     guidance_str = 0.7, 
+    desired_class = 0
 ):
     """
     A standalone training loop for classifier-free guidance.
@@ -205,7 +206,7 @@ def train_cfg(
         if epoch % save_every == 0:
             # Take a fixed batch of test images to visualize denoising
             sample_imgs, sample_labels = next(iter(test_loader))
-            print(sample_labels)
+            sample_labels = torch.full((sample_imgs.size(0),), fill_value = desired_class)
             sample_imgs = sample_imgs[:16].to(device)    # pick 16 images
             sample_labels = sample_labels[:16].to(device)
 
@@ -256,6 +257,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_every",    type=int,   default=10,    help="Save checkpoint every N epochs")
     parser.add_argument("--out_dir",       type=str,   default="./checkpoints", help="Where to save checkpoints")
     parser.add_argument("--guide",         type=float, default=0.7,   help="Guidance strength for inference")
+    parser.add_argument("--desired_class", type=int,   default=0,   help="Desired class for sampling")
     args = parser.parse_args()
 
     import os
@@ -273,5 +275,6 @@ if __name__ == "__main__":
         device=args.device,
         save_every=args.save_every,
         out_dir=args.out_dir,
-        guidance_str=args.guide
+        guidance_str=args.guide,
+        desired_class=args.desired_Class
     )
