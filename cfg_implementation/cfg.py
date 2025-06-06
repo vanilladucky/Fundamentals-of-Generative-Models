@@ -136,7 +136,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
         pin_memory=True
     )
 
-    net = Diffusion.to(device)
+    net = Diffusion().to(device)
     cfg = CFG(net = net, img_size=img_size, batch_size=batch_size, device=device, timesteps=timesteps)
     optim = torch.optim.AdamW(net.parameters(), lr=base_lr)
 
