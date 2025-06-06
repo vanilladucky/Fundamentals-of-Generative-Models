@@ -242,14 +242,7 @@ def train_cfg(
 
     # 2) Instantiate model + trainer
     unet = UNet(
-        n_classes=10,
-        base_channels=64,
-        channel_mults=[1, 2, 4, 8],
-        n_res_blocks=2,
-        time_emb_dim=128,
-        class_emb_dim=128,
-        # If you want self‐attention at certain levels, set True there:
-        use_attn=[False, False, False, False],
+        n_classes=10
     ).to(device)
     trainer = CFGTrainer(
         model=unet,
