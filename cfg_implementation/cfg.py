@@ -15,26 +15,9 @@ from torchvision.utils import save_image
 import argparse
 import logging
 
-class SimpleDDPMScheduler(nn.Module):
-    def __init__(self, timesteps: int = 1000, device = 'cuda:0'):
-        super().__init__()
-        self.timesteps = timesteps
-
-        beta_start = 1e-4
-        beta_end = 0.02
-        betas = torch.linspace(beta_start, beta_end, timesteps, dtype=torch.float32)
-
-        alphas = 1.0 - betas
-        alphas_cumprod = torch.cumprod(alphas, dim=0)
-        
-        self.register_buffer('alphas_cumprod', alphas_cumprod.to(device))
-        self.register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod).to(device))
-        self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1.0 - alphas_cumprod).to(device))
-
 @torch.no_grad()
 def sample_ddim_cfg(
     model,
-    scheduler: SimpleDDPMScheduler,
     labels_cond: torch.LongTensor,
     shape=(16, 3, 32, 32),
     device="cuda:0",
@@ -47,87 +30,65 @@ def sample_ddim_cfg(
     B = shape[0]
     device = torch.device(device)
 
-    # 1) Narrow the λ‐range to avoid float32 saturation:
-    #    (instead of [-14, +14], we clamp to [-12, +12])
     min_lambda = model.min_lambda
     max_lambda = model.max_lambda
 
-    # Build a strictly ascending λ‐sequence of length num_ddim_steps
     lambdas = torch.linspace(min_lambda, max_lambda, num_ddim_steps, device=device)
-    # lambdas_prev[i] = λ_{i+1}; for the final i, we just put a dummy λ = min_lambda
     lambdas_prev = torch.cat([lambdas[1:], torch.tensor([min_lambda], device=device)])
 
-    # 2) Start from pure Gaussian at λ=mᵢₙ
     x = torch.randn(shape, device=device)
 
-    # 3) Prepare “unconditional” label index = n_classes
     null_labels = torch.full((B,), fill_value=model.n_classes, dtype=torch.long, device=device)
 
-    eps_floor = 1e-6  # small lower bound to keep sqrt(α) and sqrt(1−α) from underflowing
+    eps_floor = 1e-6  
 
     for i, lamb in enumerate(lambdas):
         lamb_prev = lambdas_prev[i]
 
-        # 4) Compute αₜ = sigmoid(lamb), 1−αₜ, and α_{t+1} = sigmoid(lamb_prev)
-        #    but always clamp α in [eps_floor, 1−eps_floor]
-        alpha_t = model.lambda_to_signal_ratio(lamb).clamp(min=eps_floor, max=1.0 - eps_floor)       # [scalar]
-        one_minus_t = (1.0 - alpha_t).clamp(min=eps_floor)                                         # [scalar]
-        alpha_next = model.lambda_to_signal_ratio(lamb_prev).clamp(min=eps_floor, max=1.0 - eps_floor)  # [scalar]
-        one_minus_next = (1.0 - alpha_next).clamp(min=eps_floor)                                     # [scalar]
+        alpha_t = model.lambda_to_signal_ratio(lamb).clamp(min=eps_floor, max=1.0 - eps_floor)       
+        one_minus_t = (1.0 - alpha_t).clamp(min=eps_floor)                                         
+        alpha_next = model.lambda_to_signal_ratio(lamb_prev).clamp(min=eps_floor, max=1.0 - eps_floor)  
+        one_minus_next = (1.0 - alpha_next).clamp(min=eps_floor)                                     
 
-        # 5) Build √αₜ, √(1−αₜ), √α_{t+1}
-        sqrt_sr      = torch.sqrt(alpha_t).view(-1, 1, 1, 1)        # [1,1,1,1]
-        sqrt_nr      = torch.sqrt(one_minus_t).view(-1, 1, 1, 1)     # [1,1,1,1]
-        sqrt_sr_next = torch.sqrt(alpha_next).view(-1, 1, 1, 1)      # [1,1,1,1]
+        sqrt_sr      = torch.sqrt(alpha_t).view(-1, 1, 1, 1)        
+        sqrt_nr      = torch.sqrt(one_minus_t).view(-1, 1, 1, 1)     
+        sqrt_sr_next = torch.sqrt(alpha_next).view(-1, 1, 1, 1)      
 
-        # 6) Feed the FLOAT λₜ into the network (no .long() cast!)
-        lamb_batch = torch.full((B,), fill_value=lamb.item(), device=device)  # [B] float
+        lamb_batch = torch.full((B,), fill_value=lamb.item(), device=device)  
 
         eps_cond   = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=labels_cond) 
         eps_uncond = model.predict_noise(x, diffusion_step_idx=lamb_batch, label=null_labels) 
-        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond                         # [B,3,H,W]
+        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond                         
 
-        if i > 0 and i % 5 == 0:
+        """if i > 0 and i % 5 == 0:
             logging.info(f"[Step {i:03d}] λ={lamb:.2f}  "
                          f"||ε_cond||={eps_cond.norm().item():.3e}, "
                          f"||ε_uncond||={eps_uncond.norm().item():.3e}, "
-                         f"||ε_guided||={eps_guided.norm().item():.3e}")
+                         f"||ε_guided||={eps_guided.norm().item():.3e}")"""
 
-        # 7) Predict x₀ from xₜ and the guided ε̃ₜ
-        #    x0_pred = (x_t - sqrt(1−αₜ) · ε̃ₜ) / sqrt(αₜ)
-        x0_pred = (x - sqrt_nr * eps_guided) / sqrt_sr  # [B,3,H,W]
+        
+        x0_pred = (x - sqrt_nr * eps_guided) / sqrt_sr  
 
-        # 8) If this is the LAST iteration:
-        #    Take x = x0_pred and break (no further update).
         if i == num_ddim_steps - 1:
             x = x0_pred
             break
 
-        # 9) Otherwise, compute the standard DDIM σ‐coefficient:
-        #    σₜ² = η² · [ ((1−α_{t+1})/(1−αₜ)) · (1 − αₜ/α_{t+1}) ]
-        termA = one_minus_next / one_minus_t                   # scalar
-        termB = (alpha_next - alpha_t) / alpha_next            # scalar
-        ddim_sigma_sq = (termA * termB).clamp(min=0.0)         # scalar ≥ 0
-        ddim_sigma    = (eta * torch.sqrt(ddim_sigma_sq)).view(-1, 1, 1, 1)  # [1,1,1,1]
+        termA = one_minus_next / one_minus_t                   
+        termB = (alpha_next - alpha_t) / alpha_next            
+        ddim_sigma_sq = (termA * termB).clamp(min=0.0)         
+        ddim_sigma    = (eta * torch.sqrt(ddim_sigma_sq)).view(-1, 1, 1, 1)  
 
-        # 10) Sample noise (only if η > 0)
         if eta > 0.0:
             noise = torch.randn_like(x)
         else:
             noise = torch.zeros_like(x)
 
-        # 11) The DDIM update: zₜ → z_{t+1}
-        #     x_{t+1} = √α_{t+1} · x0_pred  +  σₜ ·  noise
-        x = sqrt_sr_next * x0_pred + ddim_sigma * noise       # [B,3,H,W]
+        x = sqrt_sr_next * x0_pred + ddim_sigma * noise      
 
-    # end for
-
-    # 12) Before clamping, log the raw range of x
     logging.info(f"RAW x before clamp: min={x.min().item():.3f}, "
                  f"max={x.max().item():.3f}, mean={x.mean().item():.3f}, std={x.std().item():.3f}")
 
-    # 13) Finally, clamp to [−1, +1] and map to [0,1]:
-    samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0  # [B,3,H,W] in [0,1]
+    samples = (x.clamp(-1.0, 1.0) + 1.0) / 2.0 
     logging.info(f"After clamp: samples.min={samples.min().item():.3f}, "
                  f"max={samples.max().item():.3f}, mean={samples.mean().item():.3f}, std={samples.std().item():.3f}")
 
@@ -177,21 +138,20 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
     net = UNet(n_classes=10).to(device)
     cfg = CFG(net = net, img_size=img_size, batch_size=batch_size, device=device, timesteps=timesteps)
     optim = torch.optim.AdamW(net.parameters(), lr=base_lr)
-    scheduler = SimpleDDPMScheduler(timesteps=timesteps, device=device).to(device)
 
     for epoch in range(epochs):
         net.train()
         for step, (img,labels) in enumerate(train_loader):
             images = img.to(device)        
             labels = labels.to(device) 
-            loss = cfg.get_loss(ori_image=images, true_label=labels, scheduler=scheduler)
+            loss = cfg.get_loss(ori_image=images, true_label=labels)
             optim.zero_grad()
             loss.backward()
             optim.step()
 
-            if step % 100 == 0:
+            if step % 200 == 0:
                 logging.info(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
-                # print(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
+                print(f"[Train] Epoch {epoch} | Step {step} | Loss {loss.item():.4f}")
 
         ckpt = f"ddpm_epoch_{epoch}.pth"
         torch.save(net.state_dict(), ckpt)
@@ -202,11 +162,11 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
             for step, (img, labels) in enumerate(test_loader):
                 images = img.to(device)
                 labels = labels.to(device)
-                loss = cfg.get_loss(images, labels, scheduler=scheduler)
+                loss = cfg.get_loss(images, labels)
                 total_loss+=loss.item()
             total_loss/=step
             logging.info(f"[Eval] Epoch {epoch} | Loss {total_loss:.4f}")
-            # print(f"[Eval] Epoch {epoch} | Loss {total_loss:.4f}") 
+            print(f"[Eval] Epoch {epoch} | Loss {total_loss:.4f}") 
 
         with torch.no_grad():
             sample_batch_size = 16
@@ -215,7 +175,6 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
             )  # all “class 0” (airplane)
             samples = sample_ddim_cfg(
                 model=cfg,                    
-                scheduler=scheduler,
                 labels_cond=sample_labels,
                 shape=(sample_batch_size, 3, img_size, img_size),
                 device=device,
@@ -223,8 +182,8 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
                 w = guidance_str                
             )
             
-            # samples = (samples.clamp(-1, 1) + 1) / 2.0  # now in [0,1]
-            print(">> debug: sample‐tensor shape:", samples.shape) 
+            logging.info(f"Saving: min={samples.min().item():.3f}, "
+                 f"max={samples.max().item():.3f}, mean={samples.mean().item():.3f}, std={samples.std().item():.3f}")
             grid = torchvision.utils.make_grid(samples, nrow=4)
             save_image(grid, f"./figures/samples_epoch_{epoch}.png")
 
@@ -312,7 +271,7 @@ class CFG(nn.Module):
         )
         return (1 + self.guidance_str) * pred_noise_cond - self.guidance_str * pred_noise_uncond
 
-    def get_loss(self, ori_image: torch.Tensor, true_label: torch.LongTensor, scheduler: SimpleDDPMScheduler):
+    def get_loss(self, ori_image: torch.Tensor, true_label: torch.LongTensor):
         B = ori_image.size(0)
         device = ori_image.device
 
