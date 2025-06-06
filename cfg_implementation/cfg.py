@@ -276,5 +276,5 @@ if __name__ == "__main__":
         save_every=args.save_every,
         out_dir=args.out_dir,
         guidance_str=args.guide,
-        desired_class=args.desired_Class
+        desired_class=args.desired_class
     )
