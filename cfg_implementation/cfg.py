@@ -16,6 +16,96 @@ import argparse
 import logging
 from unet_v2 import Diffusion
 
+@torch.no_grad()
+def sample_ddim_cfg_from_scratch(
+    unet: nn.Module, 
+    labels_cond: torch.LongTensor, 
+    shape=(16, 3, 32, 32),
+    device="cuda:0",
+    num_ddim_steps: int = 256,
+    eta: float = 0.0,      # η=0 → deterministic DDIM
+    w: float = 0.5,        # classifier-free guidance weight
+) -> torch.Tensor:
+    """
+    Generates new images from pure Gaussian noise using Classifier-Free Guidance + DDIM.
+
+    unet: your Diffusion model (an instance of Diffusion), whose forward(z, λ, cond) → ε̂
+    labels_cond: (B,) tensor of desired class labels in [0..n_classes-1]
+    shape: the shape of generated images = (B, C, H, W)
+    device: 'cuda:0' or 'cpu'
+    num_ddim_steps: how many DDIM steps to run
+    eta: controls extra noise: η=0 is purely deterministic; η>0 injects noise each step
+    w: guidance weight (e.g. 0.1–1.5)
+    """
+    unet.eval()
+    B = shape[0]
+    device = torch.device(device)
+
+    # 1) Build strictly ascending λ sequence: λ₁ = min_lambda, λ_T = max_lambda
+    min_lambda = unet.min_lambda
+    max_lambda = unet.max_lambda
+    lambdas = torch.linspace(min_lambda, max_lambda, num_ddim_steps, device=device)
+    lambdas_prev = torch.cat([lambdas[1:], torch.tensor([min_lambda], device=device)])
+
+    # 2) Initialize z₁ ← N(0,I)
+    z = torch.randn(shape, device=device)
+
+    # 3) Prepare the unconditional (“null”) label:
+    #    For CIFAR-10, we used an embedding size of n_classes+1, so the “null index” = 10
+    null_label = torch.full((B,), fill_value=unet.n_classes, dtype=torch.long, device=device)
+
+    eps_floor = 1e-6
+
+    for i, λ in enumerate(lambdas):
+        λ_prev = lambdas_prev[i]
+
+        # 4) Compute αₜ = sigmoid(λ), 1−αₜ, α_{t+1} = sigmoid(λ_prev)
+        alpha_t = unet.lambda_to_signal_ratio(λ).clamp(min=eps_floor, max=1.0 - eps_floor)        # scalar
+        one_minus_t = (1.0 - alpha_t).clamp(min=eps_floor)                                         # scalar
+        alpha_next = unet.lambda_to_signal_ratio(λ_prev).clamp(min=eps_floor, max=1.0 - eps_floor) # scalar
+        one_minus_next = (1.0 - alpha_next).clamp(min=eps_floor)                                    # scalar
+
+        sqrt_alpha_t = torch.sqrt(alpha_t).view(1,1,1,1)          # [1,1,1,1]
+        sqrt_one_m_t = torch.sqrt(one_minus_t).view(1,1,1,1)      # [1,1,1,1]
+        sqrt_alpha_next = torch.sqrt(alpha_next).view(1,1,1,1)    # [1,1,1,1]
+
+        # 5) Build a (B,) float tensor filled with current λ so the U-Net sees λₜ
+        λ_batch = torch.full((B,), fill_value=λ.item(), device=device)  # [B]
+
+        # 6) Query the U-Net for conditional + unconditional noise predictions:
+        ε_cond   = unet(z, λ_batch, labels_cond)   # [B,C,H,W]
+        ε_uncond = unet(z, λ_batch, null_label)     # [B,C,H,W]
+        ε_guided = (1.0 + w) * ε_cond - w * ε_uncond # [B,C,H,W]
+
+        # 7) Compute x₀_pred = (zₜ − √(1−αₜ)·ε̃ₜ) / √(αₜ)
+        x0_pred = (z - sqrt_one_m_t * ε_guided) / sqrt_alpha_t  # [B,C,H,W]
+
+        # 8) If this is the last DDIM step, set z ← x₀_pred and break
+        if i == num_ddim_steps - 1:
+            z = x0_pred
+            break
+
+        # 9) Otherwise, compute the DDIM σₜ term:
+        termA = one_minus_next / one_minus_t   # scalar
+        termB = (alpha_next - alpha_t) / alpha_next  # scalar
+        σ_t_squared = (termA * termB).clamp(min=0.0)   # scalar ≥ 0
+        σ_t = (eta * torch.sqrt(σ_t_squared)).view(1,1,1,1)  # [1,1,1,1]
+
+        # 10) Sample extra noise if η > 0
+        if eta > 0.0:
+            noise = torch.randn_like(z)
+        else:
+            noise = torch.zeros_like(z)
+
+        # 11) DDIM update: z_{t+1} = √α_{t+1} · x₀_pred + σₜ · noise
+        z = sqrt_alpha_next * x0_pred + σ_t * noise
+
+    # end for
+
+    # 12) Clamp z to [−1, +1] and move to [0,1]
+    samples = (z.clamp(-1.0, 1.0) + 1.0) / 2.0  # [B,3,H,W] in [0,1]
+    return samples
+
 class CFGTrainer:
     """
     A helper that encapsulates:
@@ -204,34 +294,23 @@ def train_cfg(
         print(f"[Epoch {epoch:03d}] Test  loss: {avg_test_loss:.5f}")
 
         if epoch % save_every == 0:
-            # Take a fixed batch of test images to visualize denoising
-            sample_imgs, sample_labels = next(iter(test_loader))
-            sample_labels = torch.full((sample_imgs.size(0),), fill_value = desired_class)
-            sample_imgs = sample_imgs[:16].to(device)    # pick 16 images
-            sample_labels = sample_labels[:16].to(device)
 
             # Sample a new random noise vector and λ, then do one forward-diffusion plus one step of denoising
             with torch.no_grad():
-                B = sample_imgs.size(0)
-                lamb = torch.full((B,), fill_value=max_lambda, device=device)  # extreme noise
-                eps = torch.randn_like(sample_imgs)
-                z_lambda = trainer.diffusion_forward(sample_imgs, lamb, eps)
-                # Predict noise with CFG (here cond=sample_labels, uncond=“null index”)
-                eps_cond   = unet(z_lambda, lamb, sample_labels)
-                eps_uncond = unet(z_lambda, lamb, torch.full_like(sample_labels, 10))
-                # Interpolate guided noise
-                w = guidance_str  # same as uncond_prob or your chosen guidance weight
-                eps_guided = (1.0 + w) * eps_cond - w * eps_uncond
-                # Single DDIM-style step: reconstruct x0
-                alpha = torch.sigmoid(lamb).view(-1,1,1,1)
-                one_minus = 1.0 - alpha
-                sqrt_alpha = torch.sqrt(alpha)
-                x0_pred = (z_lambda - torch.sqrt(one_minus) * eps_guided) / sqrt_alpha
-                x0_pred = x0_pred.clamp(-1,1)
+                B = 16
+                labels_cond = torch.full((B,), fill_value=desired_class, device=device)
 
-                # Map back to [0,1] for saving
-                samples_to_save = (x0_pred + 1.0) * 0.5
-                grid = torchvision.utils.make_grid(samples_to_save, nrow=4)
+                new_samples = sample_ddim_cfg_from_scratch(
+                    model=trainer.model,
+                    labels_cond=labels_cond,
+                    shape=(B, 3, img_size, img_size),
+                    device=device,
+                    num_ddim_steps=256,
+                    eta=0.0,          
+                    w=guidance_str
+                )
+
+                grid = torchvision.utils.make_grid(new_samples, nrow=4)
                 save_image(grid, f"./figures/epoch_{epoch:03d}_samples.png")
                 logging.info(f"Saved sample grid at epoch {epoch:03d}")
 
