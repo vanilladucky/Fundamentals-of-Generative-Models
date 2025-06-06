@@ -60,10 +60,11 @@ def expand_to_planes(input, shape):
 
 
 class Diffusion(nn.Module):
-    def __init__(self):
+    def __init__(self, min_lambda = -20, max_lambda = 20):
         super().__init__()
         c = 64  # The base channel count
-
+        self.min_lambda = min_lambda
+        self.max_lambda = max_lambda
         # The inputs to timestep_embed will approximately fall into the range
         # -10 to 10, so use std 0.2 for the Fourier Features.
         self.timestep_embed = FourierFeatures(1, 16, std=0.2)
