@@ -14,6 +14,7 @@ import torchvision
 from torchvision.utils import save_image
 import argparse
 import logging
+from unet_v2 import Diffusion
 
 @torch.no_grad()
 def sample_ddim_cfg(
@@ -135,7 +136,7 @@ def train_and_eval(img_size, batch_size, device, timesteps, epochs = 100, base_l
         pin_memory=True
     )
 
-    net = UNet(n_classes=10).to(device)
+    net = Diffusion.to(device)
     cfg = CFG(net = net, img_size=img_size, batch_size=batch_size, device=device, timesteps=timesteps)
     optim = torch.optim.AdamW(net.parameters(), lr=base_lr)
 
