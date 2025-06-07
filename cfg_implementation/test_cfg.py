@@ -78,6 +78,7 @@ def train_classifier_free(model, dataloader, optimizer,
         # predict
         eps_pred = model(z, lam, cond)
         loss = F.mse_loss(eps_pred, eps)
+        print(f"Training Loss: {loss.item():.4f}")
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
