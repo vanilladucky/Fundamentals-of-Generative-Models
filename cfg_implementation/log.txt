@@ -1,8 +1,0 @@
-2025-06-06 14:07:44,458 - INFO - [Train] Epoch 0 | Step 0 | Loss 1.1962
-2025-06-06 14:09:27,751 - INFO - [Train] Epoch 0 | Step 200 | Loss 0.1107
-2025-06-06 14:11:11,208 - INFO - [Train] Epoch 0 | Step 400 | Loss 0.0832
-2025-06-06 14:12:17,158 - INFO - [Eval] Epoch 0 | Loss 0.0818
-2025-06-06 14:12:34,372 - INFO - RAW x before clamp: min=2.521, max=4.105, mean=3.547, std=0.215
-2025-06-06 14:12:34,372 - INFO - After clamp: samples.min=1.000, max=1.000, mean=1.000, std=0.000
-2025-06-06 14:12:34,372 - INFO - Saving: min=1.000, max=1.000, mean=1.000, std=0.000
-2025-06-06 14:12:35,119 - INFO - [Train] Epoch 1 | Step 0 | Loss 0.1030
