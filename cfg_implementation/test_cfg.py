@@ -173,13 +173,13 @@ class DeepUNet(nn.Module):
 # Main: CIFAR-10 training & sampling
 # ----------------------------------------
 def main():
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda:2' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.5,)*3, (0.5,)*3)
     ])
     ds = datasets.CIFAR10(root='data/', train=True, download=True, transform=transform)
-    dl = DataLoader(ds, batch_size=128, shuffle=True, num_workers=4, pin_memory=True)
+    dl = DataLoader(ds, batch_size=256, shuffle=True, num_workers=4, pin_memory=True)
 
     model = DeepUNet().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=2e-4)
