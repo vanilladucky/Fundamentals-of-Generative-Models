@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import math, random
+import torchvision.utils as vutils
 
 # ----------------------------------------
 # Utilities for continuous-time diffusion
@@ -103,45 +104,67 @@ def train_classifier_free(model, dataloader, optimizer,
 # ----------------------------------------
 # Example conditional UNet for CIFAR-10
 # ----------------------------------------
-class CIFARCondUNet(nn.Module):
-    def __init__(self, in_channels=3, base_ch=64, num_classes=10, emb_dim=16):
+class ConvBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, groups=8):
         super().__init__()
-        # embedding for labels
-        self.label_emb = nn.Embedding(num_classes, emb_dim)
-        # downsample blocks
-        self.conv1 = nn.Conv2d(in_channels + 1 + emb_dim, base_ch, 3, padding=1)
-        self.conv2 = nn.Conv2d(base_ch, base_ch * 2, 3, padding=1)
-        self.down = nn.MaxPool2d(2)
-        # bottleneck
-        self.conv3 = nn.Conv2d(base_ch * 2, base_ch * 4, 3, padding=1)
-        # upsample blocks
-        self.up = nn.Upsample(scale_factor=2, mode='nearest')
-        self.conv4 = nn.Conv2d(base_ch * 4, base_ch * 2, 3, padding=1)
-        self.conv5 = nn.Conv2d(base_ch * 2, base_ch, 3, padding=1)
-        self.out = nn.Conv2d(base_ch, in_channels, 1)
+        self.layers = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, padding=1),
+            nn.GroupNorm(groups, out_ch),
+            nn.SiLU(),
+            nn.Conv2d(out_ch, out_ch, 3, padding=1),
+            nn.GroupNorm(groups, out_ch),
+            nn.SiLU(),
+        )
+    def forward(self, x):
+        return self.layers(x)
 
-    def forward(self, z, lam, cond):
-        B, C, H, W = z.shape
+class DeepUNet(nn.Module):
+    def __init__(self, in_channels=3, base_ch=64, num_classes=10, time_emb_dim=128):
+        super().__init__()
         # time embedding
-        t_emb = lam.view(B, 1, 1, 1).expand(-1, 1, H, W)
+        self.time_mlp = nn.Sequential(
+            nn.Linear(1, time_emb_dim),
+            nn.SiLU(),
+            nn.Linear(time_emb_dim, time_emb_dim),
+        )
+        # label embedding
+        self.label_emb = nn.Embedding(num_classes, time_emb_dim)
+        # encoder
+        self.enc1 = ConvBlock(in_channels + time_emb_dim + time_emb_dim, base_ch)
+        self.enc2 = ConvBlock(base_ch, base_ch * 2)
+        self.enc3 = ConvBlock(base_ch * 2, base_ch * 4)
+        # bottleneck
+        self.bot = ConvBlock(base_ch * 4, base_ch * 8)
+        # decoder
+        self.dec3 = ConvBlock(base_ch * 8 + base_ch * 4, base_ch * 4)
+        self.dec2 = ConvBlock(base_ch * 4 + base_ch * 2, base_ch * 2)
+        self.dec1 = ConvBlock(base_ch * 2 + base_ch, base_ch)
+        self.out = nn.Conv2d(base_ch, in_channels, 1)
+        self.pool = nn.AvgPool2d(2)
+        self.up = nn.Upsample(scale_factor=2, mode='nearest')
+
+    def forward(self, x, lam, cond):
+        B, C, H, W = x.shape
+        # time embedding
+        t = lam.view(B, 1)
+        t_emb = self.time_mlp(t).view(B, -1, 1, 1).expand(-1, -1, H, W)
         # label embedding
         if cond is not None:
-            le = self.label_emb(cond).view(B, -1, 1, 1).expand(-1, -1, H, W)
+            l_emb = self.label_emb(cond).view(B, -1, 1, 1).expand(-1, -1, H, W)
         else:
-            le = torch.zeros(B, self.label_emb.embedding_dim, H, W, device=z.device)
-        # concatenate inputs
-        x = torch.cat([z, t_emb, le], dim=1)
-        # encoder
-        x1 = F.relu(self.conv1(x))
-        x2 = F.relu(self.conv2(x1))
-        xd = self.down(x2)
+            l_emb = torch.zeros_like(t_emb)
+        h = torch.cat([x, t_emb, l_emb], dim=1)
+        # encode
+        e1 = self.enc1(h)
+        e2 = self.enc2(self.pool(e1))
+        e3 = self.enc3(self.pool(e2))
         # bottleneck
-        xb = F.relu(self.conv3(xd))
-        # decoder
-        xu = self.up(xb)
-        x4 = F.relu(self.conv4(xu))
-        x5 = F.relu(self.conv5(x4 + x2))  # skip connection
-        return self.out(x5)
+        b = self.bot(self.pool(e3))
+        # decode
+        d3 = self.dec3(torch.cat([self.up(b), e3], dim=1))
+        d2 = self.dec2(torch.cat([self.up(d3), e2], dim=1))
+        d1 = self.dec1(torch.cat([self.up(d2), e1], dim=1))
+        return self.out(d1)
 
 # ----------------------------------------
 # Main: CIFAR-10 training & sampling
@@ -173,8 +196,7 @@ def main():
             # map [-1,1] to [0,1]
             imgs = (samples.clamp(-1, 1) + 1) / 2
             # save grid
-            import torchvision.utils as vutils
-            vutils.save_image(imgs, 'samples.png', nrow=4)
+            vutils.save_image(imgs, f'samples_{ep}.png', nrow=4)
 
     
 
