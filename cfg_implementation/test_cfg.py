@@ -161,15 +161,15 @@ def main():
     opt = torch.optim.Adam(model.parameters(), lr=2e-4)
 
     # training loop
-    epochs = 20
+    epochs = 200
     for ep in range(epochs):
-        train_classifier_free(model, dl, opt, puncond=0.1, device=device)
+        train_classifier_free(model, dl, opt, puncond=0.5, device=device)
         print(f"Epoch {ep+1}/{epochs} done")
 
     # sampling example for class 3 (e.g., cat)
     B = 16
     cond = torch.full((B,), 3, dtype=torch.long, device=device)
-    samples = sample_classifier_free(model, (B, 3, 32, 32), cond, w=1.5, device=device)
+    samples = sample_classifier_free(model, (B, 3, 32, 32), cond, w=0.3, device=device)
     # map [-1,1] to [0,1]
     imgs = (samples.clamp(-1, 1) + 1) / 2
     # save grid
