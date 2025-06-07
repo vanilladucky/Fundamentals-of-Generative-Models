@@ -13,9 +13,9 @@ def sample_log_snr(u, lambda_min=-20.0, lambda_max=20.0):
     Sample log SNR using u~Uniform[0,1]
     lambda = -2 * log(tan(a*u + b))
     """
-    b = torch.atan(torch.exp(-lambda_max / 2))
-    a = torch.atan(torch.exp(-lambda_min / 2)) - b
-    return -2.0 * torch.log(torch.tan(a * u + b))
+    b = math.atan(math.exp(-lambda_max / 2))
+    a = math.atan(math.exp(-lambda_min / 2)) - b
+    return -2.0 * math.log(math.tan(a * u + b))
 
 @torch.no_grad()
 def sample_classifier_free(
