@@ -175,6 +175,7 @@ class DeepUNet(nn.Module):
 def main():
     device = 'cuda:2' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
+        transforms.Resize((64, 64)),
         transforms.ToTensor(),
         transforms.Normalize((0.5,)*3, (0.5,)*3)
     ])
@@ -192,7 +193,7 @@ def main():
             # sample and save
             B = 16
             cond = torch.full((B,), 3, dtype=torch.long, device=device)
-            samples = sample_classifier_free(model, (B,3,32,32), cond, w=0.5, device=device)
+            samples = sample_classifier_free(model, (B,3,64,64), cond, w=0.5, device=device)
             imgs = (samples.clamp(-1,1) + 1) / 2
             vutils.save_image(imgs, f'samples_{ep}.png', nrow=4)
 
