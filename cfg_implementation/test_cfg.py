@@ -15,7 +15,7 @@ def sample_log_snr(u, lambda_min=-20.0, lambda_max=20.0):
     """
     b = math.atan(math.exp(-lambda_max / 2))
     a = math.atan(math.exp(-lambda_min / 2)) - b
-    return -2.0 * math.log(math.tan(a * u + b))
+    return -2.0 * torch.log(torch.tan(a * u + b))
 
 @torch.no_grad()
 def sample_classifier_free(
