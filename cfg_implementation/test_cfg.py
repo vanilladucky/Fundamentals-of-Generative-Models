@@ -72,7 +72,10 @@ def train_classifier_free(model, dataloader, optimizer,
                            lambda_min=-20.0, lambda_max=20.0,
                            device='cuda'):
     model.train()
+    total_loss = 0
+    count = 0
     for x, labels in dataloader:
+        count+=1
         x = x.to(device)
         labels = labels.to(device)
         # drop conditioning
@@ -94,6 +97,8 @@ def train_classifier_free(model, dataloader, optimizer,
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        total_loss+=loss.item()
+    print(f"Training Loss: {total_loss/count:.4f}")
 
 # ----------------------------------------
 # Example conditional UNet for CIFAR-10
