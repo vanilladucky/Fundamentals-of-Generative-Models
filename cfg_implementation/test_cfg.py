@@ -72,6 +72,8 @@ def train_classifier_free(
     device='cuda'
 ):
     model.train()
+    train_loss = 0
+    count = 0
     for x, labels in dataloader:
         x = x.to(device)
         labels = labels.to(device)
@@ -93,6 +95,9 @@ def train_classifier_free(
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        count+=1
+        train_loss+=loss.item()
+    print(f"Training loss: {train_loss/count:.4f}")
 
 # ----------------------------------------
 # Improved conditional DeepUNet for CIFAR-10
@@ -189,7 +194,7 @@ def main():
             cond = torch.full((B,), 3, dtype=torch.long, device=device)
             samples = sample_classifier_free(model, (B,3,32,32), cond, w=0.5, device=device)
             imgs = (samples.clamp(-1,1) + 1) / 2
-            vutils.save_image(imgs, 'samples.png', nrow=4)
+            vutils.save_image(imgs, f'samples_{ep}.png', nrow=4)
 
 if __name__ == '__main__':
     main()
