@@ -13,8 +13,10 @@ def sample_log_snr(u, lambda_min=-20.0, lambda_max=20.0):
     Sample log SNR using u~Uniform[0,1]
     lambda = -2 * log(tan(a*u + b))
     """
-    b = math.atan(math.exp(-lambda_max / 2))
-    a = math.atan(math.exp(-lambda_min / 2)) - b
+    # compute scalar coefficients
+    b = math.atan(math.exp(-lambda_max / 2.0))
+    a = math.atan(math.exp(-lambda_min / 2.0)) - b
+    # return tensor of log-SNR values
     return -2.0 * torch.log(torch.tan(a * u + b))
 
 @torch.no_grad()
@@ -26,29 +28,40 @@ def sample_classifier_free(
 ):
     model.eval()
     B, C, H, W = shape
-    # init sample
+    # initialize noise
     z = torch.randn(shape, device=device)
-    # time schedule
-    us = torch.linspace(0, 1, steps=num_steps, device=device)
+    # precompute schedule of log-SNRs
+    us = torch.linspace(0.0, 1.0, steps=num_steps, device=device)
     timesteps = sample_log_snr(us, lambda_min, lambda_max)
 
-    for i in range(num_steps-1):
+    for i in range(num_steps - 1):
         lam_t = timesteps[i]
-        lam_next = timesteps[i+1]
-        alpha_t = torch.sqrt(torch.sigmoid(lam_t))
-        sigma_t = torch.sqrt(torch.sigmoid(-lam_t))
-        # pred eps_cond and eps_uncond
+        # expand scalar to batch
+        lam_t = lam_t.unsqueeze(0).expand(B)
+        lam_next = timesteps[i + 1]
+
+        # compute coefficients
+        alpha_t = torch.sqrt(torch.sigmoid(lam_t)).view(B, 1, 1, 1)
+        sigma_t = torch.sqrt(torch.sigmoid(-lam_t)).view(B, 1, 1, 1)
+
+        # predict noise
         eps_cond = model(z, lam_t, cond)
         eps_uncond = model(z, lam_t, None)
-        eps_guided = (1 + w) * eps_cond - w * eps_uncond
-        # x estimate
+        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond
+
+        # estimate x
         x_est = (z - sigma_t * eps_guided) / alpha_t
-        # next params
+
+        # prepare next noise scale
         alpha_next = torch.sqrt(torch.sigmoid(lam_next))
-        sigma_interp = ((1 - torch.exp(lam_t - lam_next)) ** (1 - v)) * \
+        sigma_interp = ((1.0 - torch.exp(lam_t - lam_next)) ** (1.0 - v)) * \
                        ((torch.sigmoid(-lam_t) - torch.sigmoid(-lam_next)) ** v)
+        sigma_interp = sigma_interp.view(B, 1, 1, 1)
+
+        # add noise
         noise = torch.randn_like(z)
         z = alpha_next * x_est + sigma_interp * noise
+
     return x_est
 
 # ----------------------------------------
@@ -71,14 +84,13 @@ def train_classifier_free(model, dataloader, optimizer,
         u = torch.rand(x.size(0), device=device)
         lam = sample_log_snr(u, lambda_min, lambda_max)
         # noise and corrupt
-        alpha = torch.sqrt(torch.sigmoid(lam)).view(-1,1,1,1)
-        sigma = torch.sqrt(torch.sigmoid(-lam)).view(-1,1,1,1)
+        alpha = torch.sqrt(torch.sigmoid(lam)).view(-1, 1, 1, 1)
+        sigma = torch.sqrt(torch.sigmoid(-lam)).view(-1, 1, 1, 1)
         eps = torch.randn_like(x)
         z = alpha * x + sigma * eps
-        # predict
+        # predict and optimize
         eps_pred = model(z, lam, cond)
         loss = F.mse_loss(eps_pred, eps)
-        print(f"Training Loss: {loss.item():.4f}")
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -93,26 +105,26 @@ class CIFARCondUNet(nn.Module):
         self.label_emb = nn.Embedding(num_classes, emb_dim)
         # downsample blocks
         self.conv1 = nn.Conv2d(in_channels + 1 + emb_dim, base_ch, 3, padding=1)
-        self.conv2 = nn.Conv2d(base_ch, base_ch*2, 3, padding=1)
+        self.conv2 = nn.Conv2d(base_ch, base_ch * 2, 3, padding=1)
         self.down = nn.MaxPool2d(2)
         # bottleneck
-        self.conv3 = nn.Conv2d(base_ch*2, base_ch*4, 3, padding=1)
+        self.conv3 = nn.Conv2d(base_ch * 2, base_ch * 4, 3, padding=1)
         # upsample blocks
         self.up = nn.Upsample(scale_factor=2, mode='nearest')
-        self.conv4 = nn.Conv2d(base_ch*4, base_ch*2, 3, padding=1)
-        self.conv5 = nn.Conv2d(base_ch*2, base_ch, 3, padding=1)
+        self.conv4 = nn.Conv2d(base_ch * 4, base_ch * 2, 3, padding=1)
+        self.conv5 = nn.Conv2d(base_ch * 2, base_ch, 3, padding=1)
         self.out = nn.Conv2d(base_ch, in_channels, 1)
 
     def forward(self, z, lam, cond):
         B, C, H, W = z.shape
-        # time embed as channel
-        t_emb = lam.view(B,1,1,1).expand(-1,1,H,W)
-        # label embed
+        # time embedding
+        t_emb = lam.view(B, 1, 1, 1).expand(-1, 1, H, W)
+        # label embedding
         if cond is not None:
-            le = self.label_emb(cond).view(B,-1,1,1).expand(-1,-1,H,W)
+            le = self.label_emb(cond).view(B, -1, 1, 1).expand(-1, -1, H, W)
         else:
             le = torch.zeros(B, self.label_emb.embedding_dim, H, W, device=z.device)
-        # concat inputs
+        # concatenate inputs
         x = torch.cat([z, t_emb, le], dim=1)
         # encoder
         x1 = F.relu(self.conv1(x))
@@ -134,7 +146,7 @@ def main():
     # CIFAR-10 dataloader
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.5,)*3, (0.5,)*3)
+        transforms.Normalize((0.5,) * 3, (0.5,) * 3)
     ])
     ds = datasets.CIFAR10(root='data/', train=True, download=True, transform=transform)
     dl = DataLoader(ds, batch_size=128, shuffle=True, num_workers=4, pin_memory=True)
@@ -152,9 +164,9 @@ def main():
     # sampling example for class 3 (e.g., cat)
     B = 16
     cond = torch.full((B,), 3, dtype=torch.long, device=device)
-    samples = sample_classifier_free(model, (B,3,32,32), cond, w=1.5, device=device)
+    samples = sample_classifier_free(model, (B, 3, 32, 32), cond, w=1.5, device=device)
     # map [-1,1] to [0,1]
-    imgs = (samples.clamp(-1,1) + 1) / 2
+    imgs = (samples.clamp(-1, 1) + 1) / 2
     # save grid
     import torchvision.utils as vutils
     vutils.save_image(imgs, 'samples.png', nrow=4)
