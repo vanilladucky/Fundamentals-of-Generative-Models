@@ -25,7 +25,7 @@ def sample_classifier_free(
     model, shape, cond, w=1.0,
     num_steps=200,
     lambda_min=-20.0, lambda_max=20.0,
-    v=0.3, device='cuda'
+    v=0.3, device='cuda:2'
 ):
     model.eval()
     B, C, H, W = shape
@@ -71,7 +71,7 @@ def sample_classifier_free(
 def train_classifier_free(model, dataloader, optimizer,
                            puncond=0.1,
                            lambda_min=-20.0, lambda_max=20.0,
-                           device='cuda'):
+                           device='cuda:2'):
     model.train()
     total_loss = 0
     count = 0
@@ -170,7 +170,7 @@ class DeepUNet(nn.Module):
 # Main: CIFAR-10 training & sampling
 # ----------------------------------------
 def main():
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda:2' if torch.cuda.is_available() else 'cpu'
     # CIFAR-10 dataloader
     transform = transforms.Compose([
         transforms.ToTensor(),
@@ -180,7 +180,7 @@ def main():
     dl = DataLoader(ds, batch_size=256, shuffle=True, num_workers=4, pin_memory=True)
 
     # model and optimizer
-    model = CIFARCondUNet().to(device)
+    model = DeepUNet().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=2e-4)
 
     # training loop
