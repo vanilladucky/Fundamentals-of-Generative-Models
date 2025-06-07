@@ -2,105 +2,131 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
-import math, random
-import torchvision.utils as vutils
-
-
-# ----------------------------------------
-# Utilities for continuous-time diffusion
-# ----------------------------------------
-def sample_log_snr(u, lambda_min=-20.0, lambda_max=20.0):
-    """
-    Convert uniform samples u in [0,1] to log-SNR values via
-    λ = -2 * log(tan(a*u + b)), where
-    b = arctan(e^{-λ_max/2}), a = arctan(e^{-λ_min/2}) - b
-    """
-    b = math.atan(math.exp(-lambda_max / 2.0))
-    a = math.atan(math.exp(-lambda_min / 2.0)) - b
-    return -2.0 * torch.log(torch.tan(a * u + b))
-
-@torch.no_grad()
-def sample_classifier_free(
-    model, shape, cond, w=1.0,
-    num_steps=200,
-    lambda_min=-20.0, lambda_max=20.0,
-    v=0.3, device='cuda'
-):
-    model.eval()
-    B, C, H, W = shape
-    z = torch.randn(shape, device=device)
-    us = torch.linspace(0.0, 1.0, steps=num_steps, device=device)
-    timesteps = sample_log_snr(us, lambda_min, lambda_max)
-
-    for i in range(num_steps - 1):
-        # batch log-SNRs
-        lam_t = timesteps[i].unsqueeze(0).expand(B)
-        lam_next = timesteps[i + 1]
-
-        # coefficients
-        alpha_t = torch.sqrt(torch.sigmoid(lam_t)).view(B,1,1,1)
-        sigma_t = torch.sqrt(torch.sigmoid(-lam_t)).view(B,1,1,1)
-
-        # predict noise
-        eps_cond = model(z, lam_t, cond)
-        eps_uncond = model(z, lam_t, None)
-        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond
-
-        # estimate x0
-        x_est = (z - sigma_t * eps_guided) / alpha_t
-
-        # compute next noise scale
-        alpha_next = torch.sqrt(torch.sigmoid(lam_next))
-        sigma_interp = ((1.0 - torch.exp(lam_t - lam_next)) ** (1.0 - v)) * \
-                       ((torch.sigmoid(-lam_t) - torch.sigmoid(-lam_next)) ** v)
-        sigma_interp = sigma_interp.view(B,1,1,1)
-
-        # sample next z
-        noise = torch.randn_like(z)
-        z = alpha_next * x_est + sigma_interp * noise
-
-    return x_est
+from torch.utils.data import DataLoader, random_split
+from diffusers import DDIMScheduler
+import random
 
 # ----------------------------------------
 # Joint training with classifier-free guidance
 # ----------------------------------------
 def train_classifier_free(
-    model, dataloader, optimizer,
-    puncond=0.5,
-    lambda_min=-20.0, lambda_max=20.0,
+    model, train_loader, val_loader, optimizer,
+    puncond=0.1,
+    timesteps=1000,
+    beta_start=0.0001, beta_end=0.02,
     device='cuda'
 ):
-    model.train()
-    train_loss = 0
-    count = 0
-    for x, labels in dataloader:
-        x = x.to(device)
-        labels = labels.to(device)
-        cond = labels if random.random() >= puncond else None
+    # build scheduler for noise scales
+    scheduler = DDIMScheduler(
+        beta_start=beta_start,
+        beta_end=beta_end,
+        beta_schedule="scaled_linear",
+        clip_sample=False,
+        set_alpha_to_one=False,
+        num_train_timesteps=timesteps
+    )
+    alphas_cumprod = scheduler.alphas_cumprod.to(device)
+    one_minus_alphas_cumprod = (1 - alphas_cumprod)
 
-        # sample noise level
-        u = torch.rand(x.size(0), device=device)
-        lam = sample_log_snr(u, lambda_min, lambda_max)
+    for epoch in range(1, num_epochs + 1):
+        model.train()
+        train_loss = 0.0
+        for x, labels in train_loader:
+            x, labels = x.to(device), labels.to(device)
+            B = x.size(0)
+            # sample random training timesteps
+            t = torch.randint(0, timesteps, (B,), device=device)
+            alpha_t = alphas_cumprod[t].view(B,1,1,1)
+            sigma_t = one_minus_alphas_cumprod[t].view(B,1,1,1)
+            # noise and corrupt
+            noise = torch.randn_like(x)
+            z = alpha_t.sqrt() * x + sigma_t.sqrt() * noise
+            # classifier-free guidance dropout
+            cond = labels if random.random() > puncond else None
+            # predict noise
+            eps_pred = model(z, t, cond)
+            loss = F.mse_loss(eps_pred, noise)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item() * B
+        train_loss /= len(train_loader.dataset)
 
-        # corrupt
-        alpha = torch.sqrt(torch.sigmoid(lam)).view(-1,1,1,1)
-        sigma = torch.sqrt(torch.sigmoid(-lam)).view(-1,1,1,1)
-        eps = torch.randn_like(x)
-        z = alpha * x + sigma * eps
+        # validation
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for x, labels in val_loader:
+                x, labels = x.to(device), labels.to(device)
+                B = x.size(0)
+                t = torch.randint(0, timesteps, (B,), device=device)
+                alpha_t = alphas_cumprod[t].view(B,1,1,1)
+                sigma_t = one_minus_alphas_cumprod[t].view(B,1,1,1)
+                noise = torch.randn_like(x)
+                z = alpha_t.sqrt() * x + sigma_t.sqrt() * noise
+                cond = labels if random.random() > puncond else None
+                eps_pred = model(z, t, cond)
+                val_loss += F.mse_loss(eps_pred, noise).item() * B
+        val_loss /= len(val_loader.dataset)
+        print(f"Epoch {epoch}/{num_epochs} — Train Loss: {train_loss:.4f} — Val Loss: {val_loss:.4f}")
 
-        # predict and update
-        eps_pred = model(z, lam, cond)
-        loss = F.mse_loss(eps_pred, eps)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        count+=1
-        train_loss+=loss.item()
-    print(f"Training loss: {train_loss/count:.4f}")
+        # sample and save every 10 epochs
+        if epoch % 10 == 0:
+            B = 16
+            cond = torch.full((B,), sample_class, dtype=torch.long, device=device)
+            samples = sample_classifier_free(
+                model,
+                (B, 3, 32, 32),
+                cond,
+                w=1.5,
+                num_inference_steps=50,
+                beta_start=beta_start,
+                beta_end=beta_end,
+                device=device
+            )
+            imgs = (samples.clamp(-1,1) + 1) / 2
+            import torchvision.utils as vutils
+            vutils.save_image(imgs, f'samples_epoch_{epoch}.png', nrow=4)
 
 # ----------------------------------------
-# Improved conditional DeepUNet for CIFAR-10
+# Sampling with DDIM Scheduler and CFG
+# ----------------------------------------
+@torch.no_grad()
+def sample_classifier_free(
+    model, shape, cond, w=1.0,
+    num_inference_steps=50,
+    beta_start=0.0001, beta_end=0.02,
+    device='cuda'
+):
+    model.eval()
+    # instantiate scheduler
+    scheduler = DDIMScheduler(
+        beta_start=beta_start,
+        beta_end=beta_end,
+        beta_schedule="scaled_linear",
+        clip_sample=False,
+        set_alpha_to_one=False,
+        num_train_timesteps=1000
+    )
+    scheduler.set_timesteps(num_inference_steps)
+    # initial noise
+    z = torch.randn(shape, device=device)
+    B = shape[0]
+    for t in scheduler.timesteps:
+        # expand and move timestep to correct device
+        t_batch = t.unsqueeze(0).expand(B).to(device)
+        # predict noise
+        eps_cond = model(z, t_batch, cond)
+        eps_uncond = model(z, t_batch, None)
+        # classifier-free guidance
+        eps_guided = (1 + w) * eps_cond - w * eps_uncond
+        # step
+        out = scheduler.step(eps_guided, t, z)
+        z = out.prev_sample
+    return z
+
+# ----------------------------------------
+# DeepUNet definition (unchanged)
 # ----------------------------------------
 class ConvBlock(nn.Module):
     def __init__(self, in_ch, out_ch):
@@ -117,53 +143,37 @@ class ConvBlock(nn.Module):
         return self.net(x)
 
 class DeepUNet(nn.Module):
-    def __init__(
-        self, in_channels=3, base_ch=64,
-        num_classes=10, time_emb_dim=128
-    ):
+    def __init__(self, in_channels=3, base_ch=64, num_classes=10, time_emb_dim=128):
         super().__init__()
-        # time & label embeddings
         self.time_mlp = nn.Sequential(
             nn.Linear(1, time_emb_dim),
             nn.SiLU(),
             nn.Linear(time_emb_dim, time_emb_dim)
         )
         self.label_emb = nn.Embedding(num_classes, time_emb_dim)
-
-        # encoder
-        self.enc1 = ConvBlock(in_channels + 2*time_emb_dim, base_ch)
-        self.enc2 = ConvBlock(base_ch, base_ch*2)
-        self.enc3 = ConvBlock(base_ch*2, base_ch*4)
-        # bottleneck
-        self.bot = ConvBlock(base_ch*4, base_ch*8)
-        # decoder
-        self.dec3 = ConvBlock(base_ch*8 + base_ch*4, base_ch*4)
-        self.dec2 = ConvBlock(base_ch*4 + base_ch*2, base_ch*2)
-        self.dec1 = ConvBlock(base_ch*2 + base_ch, base_ch)
+        self.enc1 = ConvBlock(in_channels + 2 * time_emb_dim, base_ch)
+        self.enc2 = ConvBlock(base_ch, base_ch * 2)
+        self.enc3 = ConvBlock(base_ch * 2, base_ch * 4)
+        self.bot = ConvBlock(base_ch * 4, base_ch * 8)
+        self.dec3 = ConvBlock(base_ch * 8 + base_ch * 4, base_ch * 4)
+        self.dec2 = ConvBlock(base_ch * 4 + base_ch * 2, base_ch * 2)
+        self.dec1 = ConvBlock(base_ch * 2 + base_ch, base_ch)
         self.out_conv = nn.Conv2d(base_ch, in_channels, 1)
-
         self.pool = nn.AvgPool2d(2)
         self.up = nn.Upsample(scale_factor=2, mode='nearest')
 
-    def forward(self, x, lam, cond):
+    def forward(self, x, t, cond):
         B, C, H, W = x.shape
-        # time conditioning
-        t = lam.view(B,1)
-        t_emb = self.time_mlp(t).view(B,-1,1,1).expand(-1,-1,H,W)
-        # label conditioning
+        t_emb = self.time_mlp(t.float().view(B,1)).view(B,-1,1,1).expand(-1,-1,H,W)
         if cond is not None:
             l_emb = self.label_emb(cond).view(B,-1,1,1).expand(-1,-1,H,W)
         else:
             l_emb = torch.zeros_like(t_emb)
         h = torch.cat([x, t_emb, l_emb], dim=1)
-
-        # encode
         e1 = self.enc1(h)
         e2 = self.enc2(self.pool(e1))
         e3 = self.enc3(self.pool(e2))
-        # bottleneck
         b = self.bot(self.pool(e3))
-        # decode
         d3 = self.dec3(torch.cat([self.up(b), e3], dim=1))
         d2 = self.dec2(torch.cat([self.up(d3), e2], dim=1))
         d1 = self.dec1(torch.cat([self.up(d2), e1], dim=1))
@@ -172,30 +182,30 @@ class DeepUNet(nn.Module):
 # ----------------------------------------
 # Main: CIFAR-10 training & sampling
 # ----------------------------------------
-def main():
-    device = 'cuda:2' if torch.cuda.is_available() else 'cpu'
+if __name__ == '__main__':
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
-        transforms.Resize((64, 64)),
         transforms.ToTensor(),
         transforms.Normalize((0.5,)*3, (0.5,)*3)
     ])
-    ds = datasets.CIFAR10(root='data/', train=True, download=True, transform=transform)
-    dl = DataLoader(ds, batch_size=256, shuffle=True, num_workers=4, pin_memory=True)
+    dataset = datasets.CIFAR10(root='data/', train=True, download=True, transform=transform)
+    val_size = int(0.1 * len(dataset))
+    train_size = len(dataset) - val_size
+    train_ds, val_ds = random_split(dataset, [train_size, val_size])
+    train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, num_workers=4, pin_memory=True)
 
     model = DeepUNet().to(device)
-    opt = torch.optim.Adam(model.parameters(), lr=2e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
 
-    epochs = 200
-    for ep in range(epochs):
-        train_classifier_free(model, dl, opt, puncond=0.1, device=device)
-        print(f"Epoch {ep+1}/{epochs} complete")
-        if ep > 0 and ep % 10 == 0:
-            # sample and save
-            B = 16
-            cond = torch.full((B,), 3, dtype=torch.long, device=device)
-            samples = sample_classifier_free(model, (B,3,64,64), cond, w=0.5, device=device)
-            imgs = (samples.clamp(-1,1) + 1) / 2
-            vutils.save_image(imgs, f'samples_{ep}.png', nrow=4)
-
-if __name__ == '__main__':
-    main()
+    num_epochs = 50
+    sample_class = 3  # class index to sample
+    train_classifier_free(
+        model, train_loader, val_loader,
+        optimizer,
+        puncond=0.1,
+        timesteps=1000,
+        beta_start=0.0001,
+        beta_end=0.02,
+        device=device
+    )
