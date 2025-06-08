@@ -77,14 +77,15 @@ def train_classifier_free(
             cond = torch.full((B,), sample_class, dtype=torch.long, device=device)
             samples = sample_classifier_free(
                 model,
-                (B, 3, 32, 32),
+                (B, 3, args.image_size, args.image_size),
                 cond,
-                w=1.5,
-                num_inference_steps=50,
+                w=0.3,
+                num_inference_steps=200,
                 beta_start=beta_start,
                 beta_end=beta_end,
                 device=device
             )
+            print(f"Before sampling: Max: {samples.max()} | Min: {samples.min()}")
             imgs = (samples.clamp(-1,1) + 1) / 2
             import torchvision.utils as vutils
             vutils.save_image(imgs, f'samples_epoch_{epoch}.png', nrow=4)
@@ -94,7 +95,7 @@ def train_classifier_free(
 # ----------------------------------------
 @torch.no_grad()
 def sample_classifier_free(
-    model, shape, cond, w=1.0,
+    model, shape, cond, w=0.3,
     num_inference_steps=200,
     beta_start=0.0001, beta_end=0.02,
     device='cuda'
