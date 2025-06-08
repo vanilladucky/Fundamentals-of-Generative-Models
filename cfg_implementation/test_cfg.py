@@ -187,7 +187,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--image_size",    type=int,   default=32,    help="Training image size")
     parser.add_argument("--batch_size",    type=int,   default=128,   help="Batch size")
-    parser.add_argument("--epochs",        type=int,   default=200,   help="Number of epochs")
+    parser.add_argument("--epochs",        type=int,   default=500,   help="Number of epochs")
     parser.add_argument("--lr",            type=float, default=2e-4,  help="Base learning rate")
     parser.add_argument("--uncond_prob",   type=float, default=0.4,   help="Probability of dropping label (CFG)")
     parser.add_argument("--min_lambda",    type=float, default=0.0001, help="Min λ for sampling log‐SNR")
