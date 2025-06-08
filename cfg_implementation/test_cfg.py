@@ -5,6 +5,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, random_split
 from diffusers import DDIMScheduler
 import random
+import argparse
 
 # ----------------------------------------
 # Joint training with classifier-free guidance
@@ -143,7 +144,7 @@ class ConvBlock(nn.Module):
         return self.net(x)
 
 class DeepUNet(nn.Module):
-    def __init__(self, in_channels=3, base_ch=64, num_classes=10, time_emb_dim=128):
+    def __init__(self, in_channels=3, base_ch=128, num_classes=10, time_emb_dim=128):
         super().__init__()
         self.time_mlp = nn.Sequential(
             nn.Linear(1, time_emb_dim),
@@ -183,8 +184,24 @@ class DeepUNet(nn.Module):
 # Main: CIFAR-10 training & sampling
 # ----------------------------------------
 if __name__ == '__main__':
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--image_size",    type=int,   default=32,    help="Training image size")
+    parser.add_argument("--batch_size",    type=int,   default=128,   help="Batch size")
+    parser.add_argument("--epochs",        type=int,   default=200,   help="Number of epochs")
+    parser.add_argument("--lr",            type=float, default=2e-4,  help="Base learning rate")
+    parser.add_argument("--uncond_prob",   type=float, default=0.4,   help="Probability of dropping label (CFG)")
+    parser.add_argument("--min_lambda",    type=float, default=0.0001, help="Min λ for sampling log‐SNR")
+    parser.add_argument("--max_lambda",    type=float, default=0.02,  help="Max λ for sampling log‐SNR")
+    parser.add_argument("--device",        type=str,   default="cuda",help="“cuda” or “cpu”")
+    parser.add_argument("--save_every",    type=int,   default=10,    help="Save checkpoint every N epochs")
+    parser.add_argument("--out_dir",       type=str,   default="./checkpoints", help="Where to save checkpoints")
+    parser.add_argument("--guide",         type=float, default=0.7,   help="Guidance strength for inference")
+    parser.add_argument("--desired_class", type=int,   default=0,   help="Desired class for sampling")
+    args = parser.parse_args()
+
+    device = f'{args.device}' if torch.cuda.is_available() else 'cpu'
     transform = transforms.Compose([
+        transforms.Resize((args.image_size, args.image_size)),
         transforms.ToTensor(),
         transforms.Normalize((0.5,)*3, (0.5,)*3)
     ])
@@ -192,20 +209,20 @@ if __name__ == '__main__':
     val_size = int(0.1 * len(dataset))
     train_size = len(dataset) - val_size
     train_ds, val_ds = random_split(dataset, [train_size, val_size])
-    train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     model = DeepUNet().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
 
-    num_epochs = 50
+    num_epochs = args.epochs
     sample_class = 3  # class index to sample
     train_classifier_free(
         model, train_loader, val_loader,
         optimizer,
-        puncond=0.1,
+        puncond=args.uncond_prob,
         timesteps=1000,
-        beta_start=0.0001,
-        beta_end=0.02,
+        beta_start=args.min_lambda,
+        beta_end=args.max_lambda,
         device=device
     )
