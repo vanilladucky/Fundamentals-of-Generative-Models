@@ -95,7 +95,7 @@ def train_classifier_free(
 @torch.no_grad()
 def sample_classifier_free(
     model, shape, cond, w=1.0,
-    num_inference_steps=50,
+    num_inference_steps=200,
     beta_start=0.0001, beta_end=0.02,
     device='cuda'
 ):
