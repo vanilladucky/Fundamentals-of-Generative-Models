@@ -9,9 +9,6 @@ import argparse
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 
-# ----------------------------------------
-# Joint training with classifier-free guidance
-# ----------------------------------------
 def train_classifier_free(
     model, train_loader, val_loader, optimizer,
     puncond=0.1,
@@ -90,12 +87,10 @@ def train_classifier_free(
             print(f"Before sampling: Max: {samples.max()} | Min: {samples.min()}")
             imgs = (samples.clamp(-1,1) + 1) / 2
             import torchvision.utils as vutils
-            vutils.save_image(imgs, f'samples_epoch_{epoch}.png', nrow=4)
+            vutils.save_image(imgs, f'./figures/samples_epoch_{epoch}.png', nrow=4)
         # Every epoch
         cosine_scheduler.step()
-# ----------------------------------------
-# Sampling with DDIM Scheduler and CFG
-# ----------------------------------------
+
 @torch.no_grad()
 def sample_classifier_free(
     model, shape, cond, w=0.3,
@@ -130,9 +125,6 @@ def sample_classifier_free(
         z = out.prev_sample
     return z
 
-# ----------------------------------------
-# DeepUNet definition (unchanged)
-# ----------------------------------------
 class ConvBlock(nn.Module):
     def __init__(self, in_ch, out_ch):
         super().__init__()
@@ -184,9 +176,6 @@ class DeepUNet(nn.Module):
         d1 = self.dec1(torch.cat([self.up(d2), e1], dim=1))
         return self.out_conv(d1)
 
-# ----------------------------------------
-# Main: CIFAR-10 training & sampling
-# ----------------------------------------
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--image_size",    type=int,   default=32,    help="Training image size")
