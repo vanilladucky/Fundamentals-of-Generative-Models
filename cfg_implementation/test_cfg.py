@@ -6,6 +6,8 @@ from torch.utils.data import DataLoader, random_split
 from diffusers import DDIMScheduler
 import random
 import argparse
+from torch.optim.lr_scheduler import CosineAnnealingLR
+
 
 # ----------------------------------------
 # Joint training with classifier-free guidance
@@ -89,7 +91,8 @@ def train_classifier_free(
             imgs = (samples.clamp(-1,1) + 1) / 2
             import torchvision.utils as vutils
             vutils.save_image(imgs, f'samples_epoch_{epoch}.png', nrow=4)
-
+        # Every epoch
+        scheduler.step()
 # ----------------------------------------
 # Sampling with DDIM Scheduler and CFG
 # ----------------------------------------
@@ -196,7 +199,7 @@ if __name__ == '__main__':
     parser.add_argument("--device",        type=str,   default="cuda",help="“cuda” or “cpu”")
     parser.add_argument("--save_every",    type=int,   default=10,    help="Save checkpoint every N epochs")
     parser.add_argument("--out_dir",       type=str,   default="./checkpoints", help="Where to save checkpoints")
-    parser.add_argument("--guide",         type=float, default=0.7,   help="Guidance strength for inference")
+    parser.add_argument("--guide",         type=float, default=0.3,   help="Guidance strength for inference")
     parser.add_argument("--desired_class", type=int,   default=0,   help="Desired class for sampling")
     args = parser.parse_args()
 
@@ -215,9 +218,10 @@ if __name__ == '__main__':
 
     model = DeepUNet().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
+    scheduler = CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-5)
 
     num_epochs = args.epochs
-    sample_class = 3  # class index to sample
+    sample_class = args.desired_class  # Airplane
     train_classifier_free(
         model, train_loader, val_loader,
         optimizer,
