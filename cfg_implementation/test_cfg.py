@@ -145,7 +145,7 @@ class ConvBlock(nn.Module):
         return self.net(x)
 
 class DeepUNet(nn.Module):
-    def __init__(self, in_channels=3, base_ch=128, num_classes=10, time_emb_dim=128):
+    def __init__(self, in_channels=3, base_ch=256, num_classes=10, time_emb_dim=128):
         super().__init__()
         self.time_mlp = nn.Sequential(
             nn.Linear(1, time_emb_dim),
@@ -191,8 +191,8 @@ if __name__ == '__main__':
     parser.add_argument("--epochs",        type=int,   default=500,   help="Number of epochs")
     parser.add_argument("--lr",            type=float, default=2e-4,  help="Base learning rate")
     parser.add_argument("--uncond_prob",   type=float, default=0.4,   help="Probability of dropping label (CFG)")
-    parser.add_argument("--min_lambda",    type=float, default=0.0001, help="Min λ for sampling log‐SNR")
-    parser.add_argument("--max_lambda",    type=float, default=0.02,  help="Max λ for sampling log‐SNR")
+    parser.add_argument("--min_lambda",    type=float, default=-20, help="Min λ for sampling log‐SNR")
+    parser.add_argument("--max_lambda",    type=float, default=20,  help="Max λ for sampling log‐SNR")
     parser.add_argument("--device",        type=str,   default="cuda",help="“cuda” or “cpu”")
     parser.add_argument("--save_every",    type=int,   default=10,    help="Save checkpoint every N epochs")
     parser.add_argument("--out_dir",       type=str,   default="./checkpoints", help="Where to save checkpoints")
