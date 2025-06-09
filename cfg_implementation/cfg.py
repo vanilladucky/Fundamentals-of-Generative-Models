@@ -7,6 +7,7 @@ from diffusers import DDIMScheduler
 import random
 import argparse
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from tqdm import tqdm
 
 
 def train_classifier_free(
@@ -31,7 +32,7 @@ def train_classifier_free(
     for epoch in range(1, num_epochs + 1):
         model.train()
         train_loss = 0.0
-        for x, labels in train_loader:
+        for x, labels in tqdm(train_loader, leave=True):
             x, labels = x.to(device), labels.to(device)
             B = x.size(0)
             # sample random training timesteps
