@@ -16,16 +16,17 @@ import argparse
 import logging
 from unet import UNet
 import math
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 @torch.no_grad()
 def sample_ddim_cfg_from_scratch(
-    trainer: "CFGTrainer",               # ← pass the CFGTrainer instance
-    labels_cond: torch.LongTensor,      # tensor of shape (B,), with desired class indices
+    trainer: "CFGTrainer",               
+    labels_cond: torch.LongTensor,      
     shape=(16, 3, 32, 32),
     device="cuda:0",
     num_ddim_steps: int = 256,
-    eta: float = 0.0,      # η=0 → deterministic DDIM; >0 adds stochastic noise
-    w: float = 0.5,        # guidance weight
+    eta: float = 0.0,      
+    w: float = 0.5,       
 ) -> torch.Tensor:
     """
     Generates new images from pure Gaussian noise, using Classifier‐Free Guidance + DDIM.
@@ -43,68 +44,52 @@ def sample_ddim_cfg_from_scratch(
     device = torch.device(device)
     n_classes = trainer.n_classes
 
-    # 1) Build an ascending λ‐schedule:
     min_lambda = trainer.min_lambda
     max_lambda = trainer.max_lambda
     lambdas = torch.linspace(min_lambda, max_lambda, num_ddim_steps, device=device)
     lambdas_prev = torch.cat([lambdas[1:], torch.tensor([min_lambda], device=device)])
 
-    # 2) Initialize z₁ ∈ ℝ^{B×C×H×W} as pure Gaussian noise:
     z = torch.randn(shape, device=device)
 
-    # 3) Prepare “unconditional” (null) labels for CFG:
     null_labels = torch.full((B,), fill_value=n_classes, dtype=torch.long, device=device)
 
     eps_floor = 1e-6
     for i, λ in enumerate(lambdas):
         λ_prev = lambdas_prev[i]
 
-        # 4) Compute alphaₜ = sigmoid(λ), 1−alphaₜ, alpha_{t+1} = sigmoid(λ_prev):
         alpha_t     = trainer.lambda_to_alpha(λ).clamp(min=eps_floor, max=1.0 - eps_floor)
         one_minus_t = (1.0 - alpha_t).clamp(min=eps_floor)
         alpha_next  = trainer.lambda_to_alpha(λ_prev).clamp(min=eps_floor, max=1.0 - eps_floor)
         one_minus_next = (1.0 - alpha_next).clamp(min=eps_floor)
 
-        sqrt_alpha_t      = torch.sqrt(alpha_t).view(1, 1, 1, 1)       # [1,1,1,1]
-        sqrt_one_minus_t  = torch.sqrt(one_minus_t).view(1, 1, 1, 1)   # [1,1,1,1]
-        sqrt_alpha_next   = torch.sqrt(alpha_next).view(1, 1, 1, 1)    # [1,1,1,1]
+        sqrt_alpha_t      = torch.sqrt(alpha_t).view(1, 1, 1, 1)       
+        sqrt_one_minus_t  = torch.sqrt(one_minus_t).view(1, 1, 1, 1)   
+        sqrt_alpha_next   = torch.sqrt(alpha_next).view(1, 1, 1, 1)    
 
-        # 5) Build a (B,) float‐tensor filled with current λ (so the network sees λₜ):
-        λ_batch = torch.full((B,), fill_value=λ.item(), device=device)  # [B]
+        λ_batch = torch.full((B,), fill_value=λ.item(), device=device)  
 
-        # 6) Query the UNet for conditional + unconditional noise:
-        #    Diffusion.forward(z, λ_batch, cond) returns predicted noise ε̂
-        eps_cond   = trainer.model(z, λ_batch, labels_cond)   # [B,3,H,W]
-        eps_uncond = trainer.model(z, λ_batch, null_labels)   # [B,3,H,W]
-        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond    # [B,3,H,W]
+        eps_cond   = trainer.model(z, λ_batch, labels_cond)   
+        eps_uncond = trainer.model(z, λ_batch, null_labels)   
+        eps_guided = (1.0 + w) * eps_cond - w * eps_uncond    
 
-        # 7) Compute x₀_pred from zₜ and ε̃ₜ:
-        #    x₀_pred = (zₜ − √(1−αₜ)·ε̃ₜ) / √(αₜ)
-        x0_pred = (z - sqrt_one_minus_t * eps_guided) / sqrt_alpha_t  # [B,3,H,W]
+        x0_pred = (z - sqrt_one_minus_t * eps_guided) / sqrt_alpha_t  
 
-        # 8) If this is the final step, set z ← x₀_pred and break:
         if i == num_ddim_steps - 1:
             z = x0_pred
             break
 
-        # 9) Otherwise, compute DDIM σₜ:
-        termA = one_minus_next / one_minus_t                  # scalar
-        termB = (alpha_next - alpha_t) / alpha_next            # scalar
-        sigma_squared = (termA * termB).clamp(min=0.0)          # scalar ≥0
-        ddim_sigma = (eta * torch.sqrt(sigma_squared)).view(1, 1, 1, 1)  # [1,1,1,1]
+        termA = one_minus_next / one_minus_t                 
+        termB = (alpha_next - alpha_t) / alpha_next           
+        sigma_squared = (termA * termB).clamp(min=0.0)        
+        ddim_sigma = (eta * torch.sqrt(sigma_squared)).view(1, 1, 1, 1)  
 
-        # 10) Sample extra noise if η > 0:
         if eta > 0.0:
             noise = torch.randn_like(z)
         else:
             noise = torch.zeros_like(z)
 
-        # 11) DDIM update: z_{t+1} = √(α_{t+1})·x₀_pred + σₜ · noise
         z = sqrt_alpha_next * x0_pred + ddim_sigma * noise
 
-    # end for
-
-    # 12) Finally, z ∈ [−1, +1]. Clamp & map to [0,1]:
     samples = (z.clamp(-1.0, 1.0) + 1.0) / 2.0
     return samples
 
@@ -138,11 +123,6 @@ class CFGTrainer:
         self._b = math.atan(math.exp(-self.max_lambda / 2.0))
         self._a = math.atan(math.exp(-self.min_lambda / 2.0)) - self._b
 
-        # Precompute a, b constants for inverse CF‐cosine schedule if you want,
-        # but here we’ll simply invert “uniform u → λ” directly.
-        # (As in your earlier code, you had: u ~ Uniform(0,1), λ = -2 * log(tan(a*u + b)).
-        #  But for simplicity, we’ll just sample λ ~ Uniform(min_lambda, max_lambda) each batch.)
-        # If you prefer the “cosine schedule inversion,” you can replace sample_lambda() accordingly.
 
     def sample_lambda(self, batch_size: int) -> torch.Tensor:
         u = torch.rand(batch_size, device=self.device)
@@ -166,11 +146,11 @@ class CFGTrainer:
         lamb: [B] float
         noise:[B, 3, H, W] normal
         """
-        alpha = self.lambda_to_alpha(lamb)                 # [B]
-        sigma_squared = 1.0 - alpha                                   # [B]
-        sqrt_alpha = torch.sqrt(alpha).view(-1, 1, 1, 1)       # [B,1,1,1]
-        sqrt_σ = torch.sqrt(sigma_squared).view(-1, 1, 1, 1)      # [B,1,1,1]
-        return sqrt_alpha * x0 + sqrt_σ * noise            # [B,3,H,W]
+        alpha = self.lambda_to_alpha(lamb)                 
+        sigma_squared = 1.0 - alpha                                   
+        sqrt_alpha = torch.sqrt(alpha).view(-1, 1, 1, 1)      
+        sqrt_σ = torch.sqrt(sigma_squared).view(-1, 1, 1, 1)      
+        return sqrt_alpha * x0 + sqrt_σ * noise            
 
     def compute_loss(self, clean_imgs: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         """
@@ -182,26 +162,26 @@ class CFGTrainer:
         5) return F.mse_loss(ε̂, ε)
         """
         B = clean_imgs.size(0)
-        clean_imgs = clean_imgs.to(self.device)       # expected ∈ [-1,1] already
+        clean_imgs = clean_imgs.to(self.device)       
         labels = labels.to(self.device)
 
-        # 1) Sample λ and ε
-        lamb = self.sample_lambda(B)                  # [B]
-        eps = torch.randn_like(clean_imgs)            # [B,3,H,W]
+        
+        lamb = self.sample_lambda(B)                  
+        eps = torch.randn_like(clean_imgs)           
 
-        # 2) Compute z_λ
-        z_lambda = self.diffusion_forward(clean_imgs, lamb, eps)  # [B,3,H,W]
+       
+        z_lambda = self.diffusion_forward(clean_imgs, lamb, eps) 
 
-        # 3) Randomly drop cond labels with probability uncond_prob
+       
         coin = torch.rand(B, device=self.device)
         use_null = coin < self.uncond_prob
-        null_labels = torch.full_like(labels, fill_value=self.n_classes)  # “null” index
-        cond_labels = torch.where(use_null, null_labels, labels)          # [B]
+        null_labels = torch.full_like(labels, fill_value=self.n_classes)  
+        cond_labels = torch.where(use_null, null_labels, labels)          
 
-        # 4) Predict noise
-        eps_pred = self.model(z_lambda, lamb, cond_labels)                # [B,3,H,W]
+       
+        eps_pred = self.model(z_lambda, lamb, cond_labels)               
 
-        # 5) MSE loss against true ε
+     
         loss = F.mse_loss(eps_pred, eps, reduction="mean")
         return loss
 
@@ -227,11 +207,10 @@ def train_cfg(
     torch.manual_seed(42)
     device = torch.device(device if torch.cuda.is_available() else "cpu")
 
-    # 1) Data (range [0,1] → normalize to [-1,1])
     transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
-        transforms.ToTensor(),  # [0,1]
-        transforms.Normalize(mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5)),  # [-1,1]
+        transforms.ToTensor(), 
+        transforms.Normalize(mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5)), 
     ])
 
     train_ds = datasets.CIFAR10(root="./data", train=True, download=True, transform=transform)
@@ -240,7 +219,6 @@ def train_cfg(
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=4, pin_memory=True)
     test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
-    # 2) Instantiate model + trainer
     unet = UNet(
         n_classes=10
     ).to(device)
@@ -255,6 +233,7 @@ def train_cfg(
     )
 
     optimizer = torch.optim.AdamW(unet.parameters(), lr=base_lr)
+    scheduler = CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-5)
 
     # 3) Logging setup
     logging.basicConfig(
@@ -326,6 +305,8 @@ def train_cfg(
             torch.save(unet.state_dict(), ckpt_path)
             logging.info(f"Saved model checkpoint: {ckpt_path}")
 
+        # Scheduler step every epoch
+        scheduler.step()
     print("Training complete!")
 
 # ─── Entry point ───────────────────────────────────────────────────────────
