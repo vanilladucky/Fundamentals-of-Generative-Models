@@ -39,16 +39,16 @@ This repository is updated periodically. If you have suggestions for additional 
 
 ## 2. Generative Modeling
 
+* [Score Distillation Sampling for Text-to-Image Generation](https://arxiv.org/abs/2208.09199) (17 Aug 2022)
 * [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598) (26 July 2022)  
-* [Improved Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2102.09672) (22 Feb 2021)  
-* [Diffusion Models Beat GANs on Image Synthesis](https://arxiv.org/abs/2105.05233) (10 May 2021)  
-* [Denoising Diffusion Restoration Models](https://arxiv.org/abs/2106.10194) (21 June 2021)  
 * [Elucidating the Design Space of Diffusion-Based Generative Models](https://arxiv.org/abs/2206.00364) (1 June 2022)  
 * [High-Resolution Image Synthesis with Latent Diffusion Models](https://arxiv.org/abs/2112.10752) (20 Dec 2021)  
-* [Denoising Diffusion Implicit Model](https://arxiv.org/abs/2010.02502) (6 Oct 2020)  
+* [Denoising Diffusion Restoration Models](https://arxiv.org/abs/2106.10194) (21 June 2021)  
 * [Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2006.11239) (19 June 2020)  
-* [Score Distillation Sampling for Text-to-Image Generation](https://arxiv.org/abs/2208.09199) (17 Aug 2022)  
-
+* [Diffusion Models Beat GANs on Image Synthesis](https://arxiv.org/abs/2105.05233) (10 May 2021)  
+* [Improved Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2102.09672) (22 Feb 2021)  
+* [Denoising Diffusion Implicit Model](https://arxiv.org/abs/2010.02502) (6 Oct 2020) 
+  
 ## 3. Important links
 
 * [Reverse diffusions, Score & Tweedie](https://alexxthiery.github.io/notes/reverse_and_tweedie/reverse_and_tweedie.html)  
