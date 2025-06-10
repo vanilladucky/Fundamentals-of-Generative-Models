@@ -35,10 +35,20 @@ This repository is updated periodically. If you have suggestions for additional 
 
 ### 1.3 Flow Matching
 
-* [Flow Matching for Generative Modeling](https://arxiv.org/abs/2201.13413) (31 Jan 2022)  
+- [FM-OT: Flow Matching with Optimal Transport](https://arxiv.org/abs/2402.15336) (27 Feb 2024)  
+- [Learning with Flow Models: A Survey](https://arxiv.org/abs/2401.07106) (15 Jan 2024)  
+- [Guided Rectified Flow](https://arxiv.org/abs/2310.02234) (3 Oct 2023)  
+- [Efficient Score-based Generative Modeling with Flow Matching](https://arxiv.org/abs/2306.03341) (7 Jun 2023)  
+- [Flow Matching Models for Learning Score-Based Generative Models](https://arxiv.org/abs/2304.03062) (6 Apr 2023)  
+- [Rectified Flow: A Simple Approach for Learning Stable and Efficient Diffusion Models](https://arxiv.org/abs/2302.07865) (15 Feb 2023)  
+- [Flow Matching for Generative Modeling](https://arxiv.org/abs/2201.13413) (31 Jan 2022)  
+- [TrajectoryNet: Learning Continuous Dynamics via Neural ODEs](https://arxiv.org/abs/2002.09745) (22 Feb 2020)  
 
 ## 2. Generative Modeling
 
+* [CFG-Zero⋆: Improved Classifier-Free Guidance for Flow Matching Models](https://arxiv.org/pdf/2503.18886) (24 March 2025)
+* [SDXL: Improving Latent Diffusion Models for High-Resolution Image Synthesis](https://arxiv.org/abs/2307.01952) (4 July 2023)
+* [ProlificDreamer: High-Fidelity and Diverse Text-to-3D Generation with Variational Score Distillation](https://arxiv.org/abs/2305.16213) (25 May 2023)
 * [Score Distillation Sampling for Text-to-Image Generation](https://arxiv.org/abs/2208.09199) (17 Aug 2022)
 * [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598) (26 July 2022)  
 * [Elucidating the Design Space of Diffusion-Based Generative Models](https://arxiv.org/abs/2206.00364) (1 June 2022)  
