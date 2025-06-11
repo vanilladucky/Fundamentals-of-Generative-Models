@@ -40,7 +40,7 @@ class Decoder(nn.Module):
         return self.deconv(h)
 
 
-class vae(nn.Module):
+class VAE(nn.Module):
     def __init__(self, latent_dim):
         super().__init__()
         self.encoder = Encoder(latent_dim)
