@@ -9,10 +9,10 @@ class ResBlock(nn.Module):
         super().__init__()
         self.block = nn.Sequential(
             nn.GroupNorm(8, channels),
-            nn.SiLU(inplace=True),
+            nn.SiLU(inplace=False),
             nn.Conv2d(channels, channels, 3, padding=1),
             nn.GroupNorm(8, channels),
-            nn.SiLU(inplace=True),
+            nn.SiLU(inplace=False),
             nn.Conv2d(channels, channels, 3, padding=1),
         )
 
@@ -62,31 +62,40 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, out_ch=3, base_ch=64, ch_mults=(1,2,4,8), n_res=2, z_dim=3):
         super().__init__()
-        # first project latent back to feature map
+        # project latent to the deepest feature map
         self.from_z = nn.Conv2d(z_dim, base_ch * ch_mults[-1], 3, padding=1)
-        chs = [base_ch * m for m in ch_mults[::-1]]
-        self.ups = nn.ModuleList()
+
+        # build one up-sampling block *per* down-sampling stage
+        chs = [base_ch * m for m in ch_mults[::-1]]  # e.g. [512,256,128,64]
         prev_ch = chs[0]
+        self.ups = nn.ModuleList()
         for ch in chs[1:]:
-            layers = []
-            # upsample
-            layers.append(nn.ConvTranspose2d(prev_ch, ch, 4, stride=2, padding=1))
-            prev_ch = ch
-            # n_res residual blocks
+            block = []
+            # 1) upsample by 2
+            block.append(nn.ConvTranspose2d(prev_ch, ch, kernel_size=4, stride=2, padding=1))
+            # 2) residual blocks
             for _ in range(n_res):
-                layers.append(ResBlock(prev_ch))
-            self.ups.append(nn.Sequential(*layers))
+                block.append(ResBlock(ch))
+            self.ups.append(nn.Sequential(*block))
+            prev_ch = ch
+
+        # === ADD THIS EXTRA UPSAMPLE ===
+        # last upsample to go from 64→64 at 16→32
+        self.final_upsample = nn.ConvTranspose2d(prev_ch, prev_ch, 4, stride=2, padding=1)
+
+        # output layers
         self.out_norm = nn.GroupNorm(8, prev_ch)
-        self.out_act = nn.SiLU(inplace=True)
+        self.out_act  = nn.SiLU(inplace=False)
         self.out_conv = nn.Conv2d(prev_ch, out_ch, 3, padding=1)
 
     def forward(self, z):
-        x = self.from_z(z)
+        x = self.from_z(z)               # starts at 2×2
         for stage in self.ups:
-            x = stage(x)
+            x = stage(x)                 # 2→4→8→16
+        x = self.final_upsample(x)       # 16→32
         x = self.out_norm(x)
         x = self.out_act(x)
-        return torch.sigmoid(self.out_conv(x))  # in [0,1]
+        return torch.sigmoid(self.out_conv(x))  # now back to 32×32
 
 
 class PerceptualVAE(nn.Module):

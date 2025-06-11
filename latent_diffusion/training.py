@@ -9,6 +9,7 @@ import argparse
 from VAE import VAE
 from paper_VAE import PerceptualVAE
 from D import PatchGANDiscriminator
+from tqdm import tqdm
 
 class PerceptualLoss(nn.Module):
     def __init__(self, layers=('3', '8', '15', '22')):
@@ -19,6 +20,9 @@ class PerceptualLoss(nn.Module):
         """
         super().__init__()
         vgg = torchvision.models.vgg16(pretrained=True).features.eval()
+        for m in vgg.modules():
+            if isinstance(m, nn.ReLU):
+                m.inplace = False
         for p in vgg.parameters():  # freeze
             p.requires_grad = False
         self.vgg = vgg
@@ -80,9 +84,8 @@ def train_vae(args):
     opt_G = torch.optim.Adam(G.parameters(), lr=args.lr)        
     opt_D = torch.optim.Adam(D.parameters(), lr=args.lr)
 
-    #os.makedirs(args.output_dir, exist_ok=True)
     for epoch in range(args.epochs):
-        for x, _ in loader:
+        for x, _ in tqdm(loader, leave=False):
             x = x.to(device)
             recon, mu, logvar = G(x)
             Lrec  = rec_crit(recon, x)                        
