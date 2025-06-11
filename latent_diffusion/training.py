@@ -4,7 +4,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import os
 import argparse
-from VAE import VAE
+from VAE import vae
 
 def vae_loss(recon_x, x, mu, logvar):
     recon_loss = F.mse_loss(recon_x, x, reduction='mean')
@@ -14,7 +14,7 @@ def vae_loss(recon_x, x, mu, logvar):
 
 def train_vae(args):
     device = torch.device(f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu")
-    vae = VAE(args.latent_dim).to(device)
+    vae = vae(args.latent_dim).to(device)
 
     transform = transforms.Compose([
         transforms.Resize((args.image_size, args.image_size)),
