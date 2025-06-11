@@ -68,7 +68,7 @@ def kl_regularization(mu, logvar):
 def train_vae(args):
     device = torch.device(f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu")
     λ_kl = 1e-6
-    G = PerceptualVAE(args.latent_dim).to(device)
+    G = PerceptualVAE().to(device)
     D = PatchGANDiscriminator(
     in_ch=3, base_ch=64, num_layers=3  # your discriminator arch
     ).to(device)
