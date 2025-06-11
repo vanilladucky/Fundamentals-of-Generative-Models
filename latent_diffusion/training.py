@@ -1,21 +1,75 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import os
 import argparse
 from VAE import VAE
+from paper_VAE import PerceptualVAE
+from D import PatchGANDiscriminator
 
-def vae_loss(recon_x, x, mu, logvar):
-    recon_loss = F.mse_loss(recon_x, x, reduction='mean')
-    kld = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-    return recon_loss + kld
+class PerceptualLoss(nn.Module):
+    def __init__(self, layers=('3', '8', '15', '22')):
+        """
+        Uses VGG16 feature maps at given layer indices to compute
+        L1 loss between recon and target in feature space.
+        layers: tuple of indices into vgg.features
+        """
+        super().__init__()
+        vgg = torchvision.models.vgg16(pretrained=True).features.eval()
+        for p in vgg.parameters():  # freeze
+            p.requires_grad = False
+        self.vgg = vgg
+        self.layers = layers
+        self.criterion = nn.L1Loss()
+
+    def forward(self, recon, target):
+        x, y = recon, target
+        loss = 0.0
+        for idx in self.layers:
+            x = self.vgg[int(idx)](x)
+            y = self.vgg[int(idx)](y)
+            loss = loss + self.criterion(x, y)
+        return loss
+
+adv_criterion = nn.BCEWithLogitsLoss()
+
+def discriminator_step(D, real_imgs, fake_imgs, opt_D):
+    # real_imgs, fake_imgs: [B,3,H,W]
+    real_logits = D(real_imgs)                     # → [B,1,h,w]
+    fake_logits = D(fake_imgs.detach())            # detach so G isn't updated here
+
+    real_loss = adv_criterion(real_logits, torch.ones_like(real_logits))
+    fake_loss = adv_criterion(fake_logits, torch.zeros_like(fake_logits))
+    d_loss = 0.5 * (real_loss + fake_loss)
+
+    opt_D.zero_grad()
+    d_loss.backward()
+    opt_D.step()
+    return d_loss.item()
+
+def generator_adv_loss(D, fake_imgs):
+    fake_logits = D(fake_imgs)
+    # generator wants discriminator to predict 1 for its outputs
+    return adv_criterion(fake_logits, torch.ones_like(fake_logits))
+
+def kl_regularization(mu, logvar):
+    # standard formula:  -0.5 * sum(1 + logσ² - μ² - σ²)
+    kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
+    return kl.mean()
 
 
 def train_vae(args):
     device = torch.device(f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu")
-    vae = VAE(args.latent_dim).to(device)
-
+    λ_kl = 1e-6
+    G = PerceptualVAE(args.latent_dim).to(device)
+    D = PatchGANDiscriminator(
+    in_ch=3, base_ch=64, num_layers=3  # your discriminator arch
+    ).to(device)
+    rec_crit = PerceptualLoss()
+    
     transform = transforms.Compose([
         transforms.Resize((args.image_size, args.image_size)),
         transforms.ToTensor(),
@@ -23,23 +77,34 @@ def train_vae(args):
     dataset = datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
-    optimizer = torch.optim.Adam(vae.parameters(), lr=args.lr)
+    opt_G = torch.optim.Adam(G.parameters(), lr=args.lr)        
+    opt_D = torch.optim.Adam(D.parameters(), lr=args.lr)
 
     #os.makedirs(args.output_dir, exist_ok=True)
     for epoch in range(args.epochs):
-        vae.train()
-        total_loss = 0
         for x, _ in loader:
             x = x.to(device)
-            recon, mu, logvar = vae(x)
-            loss = vae_loss(recon, x, mu, logvar)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
+            recon, mu, logvar = G(x)
+            Lrec  = rec_crit(recon, x)                        
+            Ladv  = generator_adv_loss(D, recon)            
+            Lkl   = kl_regularization(mu, logvar)  
 
-        print(f"Epoch {epoch+1}, Loss: {total_loss / len(loader):.4f}")
-        #torch.save(vae.state_dict(), os.path.join(args.output_dir, f"vae_epoch{epoch+1}.pt"))
+            loss_G = Lrec + Ladv + λ_kl * Lkl
+            opt_G.zero_grad()
+            loss_G.backward()
+            opt_G.step()
+
+            real_logits = D(x)
+            fake_logits = D(recon.detach())
+            real_loss = adv_criterion(real_logits, torch.ones_like(real_logits))
+            fake_loss = adv_criterion(fake_logits, torch.zeros_like(fake_logits))
+            loss_D = 0.5 * (real_loss + fake_loss)
+
+            opt_D.zero_grad()
+            loss_D.backward()
+            opt_D.step()
+
+        print(f"[Epoch {epoch+1}] G_loss: {loss_G.item():.4f} | D_loss: {loss_D.item():.4f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -48,7 +113,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--output_dir", type=str, default="./vae_checkpoints")
-    parser.add_argument("--image_size", type=int, default=64)
+    parser.add_argument("--image_size", type=int, default=32)
     parser.add_argument("--cuda", type=int, default=0)
     args = parser.parse_args()
     train_vae(args)
