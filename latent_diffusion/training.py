@@ -10,6 +10,8 @@ from VAE import VAE
 from paper_VAE import PerceptualVAE
 from D import PatchGANDiscriminator
 from tqdm import tqdm
+import torchvision.utils as vutils
+
 
 class PerceptualLoss(nn.Module):
     def __init__(self, layers=('3', '8', '15', '22')):
@@ -106,6 +108,15 @@ def train_vae(args):
             opt_D.zero_grad()
             loss_D.backward()
             opt_D.step()
+            
+        # Sample random latent vectors and decode
+        with torch.no_grad():
+            z = torch.randn(16, args.latent_dim).to(device)  # 16 samples
+            sampled_imgs = G.decode(z)  # assumes your PerceptualVAE has a .decode() method
+
+        # Save the generated samples
+        grid = vutils.make_grid(sampled_imgs, nrow=4, normalize=True)
+        vutils.save_image(grid, f"{args.output_dir}/sampled_epoch_{epoch+1:03d}.png")
 
         print(f"[Epoch {epoch+1}] G_loss: {loss_G.item():.4f} | D_loss: {loss_D.item():.4f}")
 
