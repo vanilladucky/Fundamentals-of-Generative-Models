@@ -108,11 +108,11 @@ def train_vae(args):
             opt_D.zero_grad()
             loss_D.backward()
             opt_D.step()
-            
+
         # Sample random latent vectors and decode
         with torch.no_grad():
             z = torch.randn(16, args.latent_dim).to(device)  # 16 samples
-            sampled_imgs = G.decode(z)  # assumes your PerceptualVAE has a .decode() method
+            sampled_imgs = G.decoder(z)  # assumes your PerceptualVAE has a .decode() method
 
         # Save the generated samples
         grid = vutils.make_grid(sampled_imgs, nrow=4, normalize=True)
