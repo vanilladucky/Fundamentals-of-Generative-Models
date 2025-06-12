@@ -116,7 +116,7 @@ def train_vae(args):
 
         # Save the generated samples
         grid = vutils.make_grid(sampled_imgs, nrow=4, normalize=True)
-        vutils.save_image(grid, f"{args.output_dir}/sampled_epoch_{epoch+1:03d}.png")
+        vutils.save_image(grid, f"sampled_epoch_{epoch+1:03d}.png")
 
         print(f"[Epoch {epoch+1}] G_loss: {loss_G.item():.4f} | D_loss: {loss_D.item():.4f}")
 
