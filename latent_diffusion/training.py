@@ -111,7 +111,7 @@ def train_vae(args):
 
         # Sample random latent vectors and decode
         with torch.no_grad():
-            z = torch.randn(16, args.latent_dim).to(device)  # 16 samples
+            z = torch.randn(16, 1, 1, args.latent_dim).to(device)  # 16 samples
             sampled_imgs = G.decoder(z)  # assumes your PerceptualVAE has a .decode() method
 
         # Save the generated samples
