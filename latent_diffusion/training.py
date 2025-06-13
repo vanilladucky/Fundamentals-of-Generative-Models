@@ -6,9 +6,8 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import os
 import argparse
-from VAE import VAE
-from paper_VAE import PerceptualVAE
-from D import PatchGANDiscriminator
+from vae import vae
+from discriminator import NLayerDiscriminator
 from tqdm import tqdm
 import torchvision.utils as vutils
 
@@ -70,21 +69,23 @@ def kl_regularization(mu, logvar):
 def train_vae(args):
     device = torch.device(f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu")
     λ_kl = 1e-6
-    G = PerceptualVAE().to(device)
-    D = PatchGANDiscriminator(
-    in_ch=3, base_ch=64, num_layers=3  # your discriminator arch
-    ).to(device)
-    rec_crit = PerceptualLoss()
+    G = vae().to(device)
+    D = NLayerDiscriminator().to(device)
+    rec_crit = PerceptualLoss().to(device)
     
     transform = transforms.Compose([
         transforms.Resize((args.image_size, args.image_size)),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std =[0.229, 0.224, 0.225]
+            ),
         transforms.ToTensor(),
     ])
     dataset = datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
-    opt_G = torch.optim.Adam(G.parameters(), lr=args.lr)        
-    opt_D = torch.optim.Adam(D.parameters(), lr=args.lr)
+    opt_G = torch.optim.AdamW(G.parameters(), lr=args.lr)        
+    opt_D = torch.optim.AdamW(D.parameters(), lr=args.lr)
 
     for epoch in range(args.epochs):
         for x, _ in tqdm(loader, leave=False):
@@ -99,20 +100,12 @@ def train_vae(args):
             loss_G.backward()
             opt_G.step()
 
-            real_logits = D(x)
-            fake_logits = D(recon.detach())
-            real_loss = adv_criterion(real_logits, torch.ones_like(real_logits))
-            fake_loss = adv_criterion(fake_logits, torch.zeros_like(fake_logits))
-            loss_D = 0.5 * (real_loss + fake_loss)
-
-            opt_D.zero_grad()
-            loss_D.backward()
-            opt_D.step()
+            loss_D = discriminator_step(D, x, recon, opt_D)
 
         # Sample random latent vectors and decode
         with torch.no_grad():
-            z = torch.randn(16, 3, int((args.latent_dim)**0.5), int((args.latent_dim)**0.5)).to(device)  # 16 samples
-            sampled_imgs = G.decoder(z)  # assumes your PerceptualVAE has a .decode() method
+            z = torch.randn(16, 3, int((args.latent_dim)**0.5), int((args.latent_dim)**0.5)).to(device)
+            sampled_imgs = G.decoder(z) 
 
         # Save the generated samples
         grid = vutils.make_grid(sampled_imgs, nrow=4, normalize=True)

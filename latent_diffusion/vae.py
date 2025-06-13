@@ -1,58 +1,95 @@
-import torch
 import torch.nn as nn
+from decoder import Decoder2
+from encoder import Encoder2
+from conv_blocks import WeightStandardizedConv2d
+from distributions import DiagonalGaussianDistribution
 
-class Encoder(nn.Module):
-    def __init__(self, latent_dim):
-        super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(3, 32, 4, 2, 1),  # 32x16x16
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 4, 2, 1), # 64x8x8
-            nn.ReLU(),
-            nn.Conv2d(64, 128, 4, 2, 1), # 128x4x4
-            nn.ReLU(),
-        )
-        self.flatten = nn.Flatten()
-        self.fc_mu = nn.Linear(128 * 4 * 4, latent_dim)
-        self.fc_logvar = nn.Linear(128 * 4 * 4, latent_dim)
+from typing import Tuple, Optional, List
 
-    def forward(self, x):
-        h = self.conv(x)
-        h = self.flatten(h)
-        return self.fc_mu(h), self.fc_logvar(h)
-
-
-class Decoder(nn.Module):
-    def __init__(self, latent_dim):
-        super().__init__()
-        self.fc = nn.Linear(latent_dim, 128 * 4 * 4)
-        self.deconv = nn.Sequential(
-            nn.ConvTranspose2d(128, 64, 4, 2, 1),  # 64x8x8
-            nn.ReLU(),
-            nn.ConvTranspose2d(64, 32, 4, 2, 1),   # 32x16x16
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, 3, 4, 2, 1),    # 3x32x32
-            nn.Sigmoid(),  # To get output in [0, 1]
-        )
-
-    def forward(self, z):
-        h = self.fc(z).view(-1, 128, 4, 4)
-        return self.deconv(h)
-
-
+# ------------------------------------------------- VAE model ----------------------------------------------------------
 class VAE(nn.Module):
-    def __init__(self, latent_dim):
+    def __init__(self,
+                 img_ch: int = 3,
+                 enc_init_ch: int = 64,
+                 ch_mult: Tuple[int] = (1, 2, 4, 4),
+                 grnorm_groups: int = 8,
+                 resnet_stacks: int = 2,
+                 latent_dim: int = 4,
+                 embed_dim = None,
+                 down_mode: str = 'avg',
+                 down_kern: int = 2,
+                 down_attn: Optional[List[int]] = [],
+                 up_mode: str = 'bilinear',
+                 up_scale: int = 2,
+                 up_attn: Optional[List[int]] = [],
+                 attn_heads: Optional[int] = 4,
+                 attn_dim: Optional[int] = 8,
+                 eps: Optional[float] = 1e-6,
+                 scaling_factor: Optional[float] = 0.18215,
+                 dec_tanh_out: bool = False):
+
         super().__init__()
-        self.encoder = Encoder(latent_dim)
-        self.decoder = Decoder(latent_dim)
+        embed_dim = latent_dim if embed_dim is None else embed_dim
 
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
+        self._encoder = Encoder2(in_planes = img_ch,
+                                 init_planes = enc_init_ch,
+                                 plains_mults = ch_mult,
+                                 resnet_grnorm_groups = grnorm_groups,
+                                 resnet_stacks = resnet_stacks,
+                                 downsample_mode = down_mode,
+                                 pool_kern = down_kern,
+                                 attention = down_attn,
+                                 latent_dim = latent_dim *2,
+                                 eps = eps,
+                                 legacy_mid = False,
+                                 attn_heads = attn_heads,
+                                 attn_dim = attn_dim)
 
-    def forward(self, x):
-        mu, logvar = self.encoder(x)
-        z = self.reparameterize(mu, logvar)
-        recon = self.decoder(z)
-        return recon, mu, logvar
+        ch_mult = tuple(reversed(list(ch_mult)))
+        self._decoder = Decoder2(in_planes=latent_dim,
+                                 out_planes=img_ch,
+                                 init_planes=enc_init_ch,
+                                 plains_divs=ch_mult,
+                                 resnet_grnorm_groups=grnorm_groups,
+                                 resnet_stacks=resnet_stacks,
+                                 up_mode = up_mode,
+                                 scale = up_scale,
+                                 attention = up_attn,
+                                 eps = eps,
+                                 legacy_mid = False,
+                                 attn_heads = attn_heads,
+                                 attn_dim = attn_dim,
+                                 tanh_out = dec_tanh_out)
+
+        self.pre_quantizer = WeightStandardizedConv2d(latent_dim*2, 2*embed_dim, kernel_size=1)
+        self.post_quantizer = WeightStandardizedConv2d(embed_dim, latent_dim, kernel_size=1)
+        self.scaling_factor = scaling_factor
+
+    def _encode(self, x):
+        h = self._encoder(x)
+        moments = self.pre_quantizer(h)
+        posterior = DiagonalGaussianDistribution(moments)
+        return posterior
+
+    def encode(self, x):
+        h = self._encoder(x)
+        moments = self.pre_quantizer(h)
+        posterior = DiagonalGaussianDistribution(moments)
+        return posterior.sample()
+
+    def decode(self, z):
+        z = self.post_quantizer(z)
+        dec = self._decoder(z)
+        return dec
+
+    def forward(self, x, sample_posterior=True):
+        posterior = self._encode(x)
+        if sample_posterior:
+            z = posterior.sample()
+        else:
+            z = posterior.mode()
+        dec = self.decode(z)
+        return dec, posterior
+
+    def get_last_layer(self):
+        return self._decoder.post_up[1].weight
