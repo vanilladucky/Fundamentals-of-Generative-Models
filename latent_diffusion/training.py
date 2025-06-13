@@ -113,7 +113,7 @@ def train_vae(args):
         grid = vutils.make_grid(sampled_imgs, nrow=4, normalize=True)
         vutils.save_image(grid, f"sampled_epoch_{epoch+1:03d}.png")
 
-        print(f"[Epoch {epoch+1}] G_loss: {loss_G.item():.4f} | D_loss: {loss_D.item():.4f}")
+        print(f"[Epoch {epoch+1}] G_loss: {loss_G.item():.4f} | D_loss: {loss_D:.4f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
