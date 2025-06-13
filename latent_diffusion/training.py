@@ -10,7 +10,7 @@ from vae import VAE
 from discriminator import NLayerDiscriminator
 from tqdm import tqdm
 import torchvision.utils as vutils
-
+from torch.distributions import Normal, kl_divergence
 
 class PerceptualLoss(nn.Module):
     def __init__(self, layers=('3', '8', '15', '22')):
@@ -60,9 +60,13 @@ def generator_adv_loss(D, fake_imgs):
     # generator wants discriminator to predict 1 for its outputs
     return adv_criterion(fake_logits, torch.ones_like(fake_logits))
 
-def kl_regularization(mu, logvar):
-    # standard formula:  -0.5 * sum(1 + logσ² - μ² - σ²)
-    kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
+def kl_regularization(posterior, prior=None):
+    if prior is None:
+        zeros = torch.zeros_like(posterior.loc)
+        ones  = torch.ones_like(posterior.loc)
+        prior = Normal(zeros, ones)
+    # this returns a per-sample, per-dimension KL; we just take the mean
+    kl = kl_divergence(posterior, prior)
     return kl.mean()
 
 
@@ -90,10 +94,10 @@ def train_vae(args):
     for epoch in range(args.epochs):
         for x, _ in tqdm(loader, leave=False):
             x = x.to(device)
-            recon, mu, logvar = G(x)
+            recon, posterior = G(x)
             Lrec  = rec_crit(recon, x)                        
             Ladv  = generator_adv_loss(D, recon)            
-            Lkl   = kl_regularization(mu, logvar)  
+            Lkl   = kl_regularization(posterior)  
 
             loss_G = Lrec + Ladv + λ_kl * Lkl
             opt_G.zero_grad()
