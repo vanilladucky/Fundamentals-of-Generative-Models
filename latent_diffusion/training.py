@@ -69,7 +69,7 @@ def kl_regularization(mu, logvar):
 def train_vae(args):
     device = torch.device(f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu")
     λ_kl = 1e-6
-    G = vae().to(device)
+    G = VAE().to(device)
     D = NLayerDiscriminator().to(device)
     rec_crit = PerceptualLoss().to(device)
     
