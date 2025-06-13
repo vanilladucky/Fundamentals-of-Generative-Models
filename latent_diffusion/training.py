@@ -60,13 +60,11 @@ def generator_adv_loss(D, fake_imgs):
     # generator wants discriminator to predict 1 for its outputs
     return adv_criterion(fake_logits, torch.ones_like(fake_logits))
 
-def kl_regularization(posterior, prior=None):
-    if prior is None:
-        zeros = torch.zeros_like(posterior.loc)
-        ones  = torch.ones_like(posterior.loc)
-        prior = Normal(zeros, ones)
-    # this returns a per-sample, per-dimension KL; we just take the mean
-    kl = kl_divergence(posterior, prior)
+def kl_regularization(posterior):
+    mu     = posterior.mean          
+    var    = posterior.var 
+    logvar    = posterior.logvar       
+    kl = -0.5 * (1 + logvar - mu.pow(2) - var)
     return kl.mean()
 
 
