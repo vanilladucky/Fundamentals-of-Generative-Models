@@ -6,7 +6,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import os
 import argparse
-from vae import vae
+from vae import VAE
 from discriminator import NLayerDiscriminator
 from tqdm import tqdm
 import torchvision.utils as vutils
