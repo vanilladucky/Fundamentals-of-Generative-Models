@@ -107,7 +107,7 @@ def train_vae(args):
         # Sample random latent vectors and decode
         with torch.no_grad():
             z = torch.randn(16, 3, int((args.latent_dim)**0.5), int((args.latent_dim)**0.5)).to(device)
-            sampled_imgs = G.decoder(z) 
+            sampled_imgs = G.decode(z) 
 
         # Save the generated samples
         grid = vutils.make_grid(sampled_imgs, nrow=4, normalize=True)
