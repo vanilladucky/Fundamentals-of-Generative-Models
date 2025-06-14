@@ -67,12 +67,30 @@ def kl_regularization(posterior):
     kl = -0.5 * (1 + logvar - mu.pow(2) - var)
     return kl.mean()
 
+def partial_load_model(model, saved_model_path):
+    """ https://discuss.pytorch.org/t/how-to-load-part-of-pre-trained-model/1113/31 """
+    pretrained_dict = torch.load(saved_model_path, map_location='cpu')
+    model_dict = model.state_dict()
+
+    # 1. filter out unnecessary keys
+    # pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+    pretrained_dict = {k: v for k, v in pretrained_dict.items() if
+                       (k in model_dict) and (model_dict[k].shape == pretrained_dict[k].shape)}
+
+    # 2. overwrite entries in the existing state dict
+    model_dict.update(pretrained_dict)
+    # 3. load the new state dict
+    status = model.load_state_dict(pretrained_dict, strict=False)
+    print(status)
+
+    return model
 
 def train_vae(args):
     device = torch.device(f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu")
     λ_kl = 1e-6
     G = VAE().to(device)
     D = NLayerDiscriminator().to(device)
+    partial_load_model(D, 'day2night.t7')
     rec_crit = PerceptualLoss().to(device)
     
     transform = transforms.Compose([
