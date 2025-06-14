@@ -86,6 +86,24 @@ class ActNorm(nn.Module):
             h = h.squeeze(-1).squeeze(-1)
         return h
 
+def partial_load_model(model, saved_model_path):
+    """ https://discuss.pytorch.org/t/how-to-load-part-of-pre-trained-model/1113/31 """
+    pretrained_dict = torch.load(saved_model_path, map_location='cpu')
+    model_dict = model.state_dict()
+
+    # 1. filter out unnecessary keys
+    # pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+    pretrained_dict = {k: v for k, v in pretrained_dict.items() if
+                       (k in model_dict) and (model_dict[k].shape == pretrained_dict[k].shape)}
+
+    # 2. overwrite entries in the existing state dict
+    model_dict.update(pretrained_dict)
+    # 3. load the new state dict
+    status = model.load_state_dict(pretrained_dict, strict=False)
+    print(status)
+
+    return model
+
 class NLayerDiscriminator(nn.Module):
     """Defines a PatchGAN discriminator as in Pix2Pix
         --> see https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/models/networks.py

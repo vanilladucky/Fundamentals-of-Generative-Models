@@ -109,9 +109,10 @@ def train_vae(args):
             z = torch.randn(16, 4, int((args.latent_dim)**0.5), int((args.latent_dim)**0.5)).to(device)
             sampled_imgs = G.decode(z) 
 
-        # Save the generated samples
-        grid = vutils.make_grid(sampled_imgs, nrow=4, normalize=True)
-        vutils.save_image(grid, f"sampled_epoch_{epoch+1:03d}.png")
+        if epoch > 0 and epoch % 100 == 0:
+            # Save the generated samples
+            grid = vutils.make_grid(sampled_imgs, nrow=4, normalize=True)
+            vutils.save_image(grid, f"sampled_epoch_{epoch+1:03d}.png")
 
         print(f"[Epoch {epoch+1}] G_loss: {loss_G.item():.4f} | D_loss: {loss_D:.4f}")
 
