@@ -3,3 +3,5 @@
 ddpm_ddim_implementation/data
 cfg_implementation/path/to/store/cifar10
 cfg_implementation/data
+latent_diffusion/data
+latent_diffusion/day2nightclear.t7
