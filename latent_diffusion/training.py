@@ -69,7 +69,7 @@ def kl_regularization(posterior):
 
 def partial_load_model(model, saved_model_path):
     """ https://discuss.pytorch.org/t/how-to-load-part-of-pre-trained-model/1113/31 """
-    pretrained_dict = torch.load(saved_model_path, map_location='cpu')
+    pretrained_dict = torch.load(saved_model_path, map_location=f'cuda:{args.cuda}')
     model_dict = model.state_dict()
 
     # 1. filter out unnecessary keys
