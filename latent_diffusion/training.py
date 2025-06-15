@@ -86,7 +86,7 @@ def partial_load_model(model, saved_model_path):
     return model
 
 def train_vae(args):
-    device = torch.device(f"cuda:{args.cuda}" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{args.cuda}" if torch.cuda.is_available() else "mps")
     λ_kl = 1e-6
     G = VAE().to(device)
     D = NLayerDiscriminator().to(device)
