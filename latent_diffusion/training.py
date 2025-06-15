@@ -90,7 +90,7 @@ def train_vae(args):
     λ_kl = 1e-6
     G = VAE().to(device)
     D = NLayerDiscriminator().to(device)
-    D = partial_load_model(D, 'day2night.t7')
+    # D = partial_load_model(D, 'day2night.t7')
     rec_crit = PerceptualLoss().to(device)
     
     transform = transforms.Compose([
