@@ -104,8 +104,8 @@ def train_vae(args):
     dataset = datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
-    opt_G = torch.optim.AdamW(G.parameters(), lr=args.lr)        
-    opt_D = torch.optim.AdamW(D.parameters(), lr=args.lr)
+    opt_G = torch.optim.AdamW(G.parameters(), lr=8e-3, betas=[0.5, 0.9], weight_decay=1e-5)        
+    opt_D = torch.optim.AdamW(D.parameters(), lr=1e-4, betas=[0.5, 0.9], weight_decay=1e-5)
 
     for epoch in range(args.epochs):
         for x, _ in tqdm(loader, leave=False):
@@ -127,16 +127,16 @@ def train_vae(args):
             z = torch.randn(16, 4, int((args.latent_dim)**0.5), int((args.latent_dim)**0.5)).to(device)
             sampled_imgs = G.decode(z) 
 
-        if epoch > 0 and epoch % 100 == 0:
+        if (epoch+1) > 0 and (epoch+1) % 10 == 0:
             # Save the generated samples
             grid = vutils.make_grid(sampled_imgs, nrow=4, normalize=True)
-            vutils.save_image(grid, f"sampled_epoch_{epoch+1:03d}.png")
+            vutils.save_image(grid, f"sampled_epoch_{(epoch+1):03d}.png")
 
         print(f"[Epoch {epoch+1}] G_loss: {loss_G.item():.4f} | D_loss: {loss_D:.4f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--latent_dim", type=int, default=256)
+    parser.add_argument("--latent_dim", type=int, default=16)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-3)
