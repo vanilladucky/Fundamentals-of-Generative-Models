@@ -114,8 +114,8 @@ def train_vae(args):
     dataset = datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
-    opt_G = torch.optim.AdamW(G.parameters(), lr=1e-4, betas=[0.5, 0.9], weight_decay=1e-5)        
-    opt_D = torch.optim.AdamW(D.parameters(), lr=1e-4, betas=[0.5, 0.9], weight_decay=1e-5)
+    opt_G = torch.optim.AdamW(G.parameters(), lr=1e-5, weight_decay=1e-5)        
+    opt_D = torch.optim.AdamW(D.parameters(), lr=1e-5, weight_decay=1e-5)
 
     for epoch in range(args.epochs):
         train_loss = 0
