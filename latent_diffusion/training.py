@@ -104,16 +104,15 @@ def train_vae(args):
     ).to(device)
     
     transform = transforms.Compose([
-    transforms.Resize((args.image_size, args.image_size)),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std =[0.229, 0.224, 0.225]
-    )
+        transforms.Resize((args.image_size, args.image_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std =[0.229, 0.224, 0.225]
+            )
     ])
-
-    dataset = datasets.ImageFolder(root='./data', transform=transform)
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=8, pin_memory=True)
+    dataset = datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
     opt_G = torch.optim.AdamW(G.parameters(), lr=1e-4, betas=[0.5, 0.9], weight_decay=1e-5)        
     opt_D = torch.optim.AdamW(D.parameters(), lr=1e-4, betas=[0.5, 0.9], weight_decay=1e-5)
@@ -172,7 +171,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--output_dir", type=str, default="./vae_checkpoints")
-    parser.add_argument("--image_size", type=int, default=256)
+    parser.add_argument("--image_size", type=int, default=128)
     parser.add_argument("--cuda", type=int, default=0)
     args = parser.parse_args()
     train_vae(args)
