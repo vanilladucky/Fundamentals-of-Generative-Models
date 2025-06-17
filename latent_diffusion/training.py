@@ -121,7 +121,7 @@ def train_vae(args):
         for x, _ in tqdm(loader, leave=False):
             x = x.to(device)
             recon, posterior = G(x)
-            
+
             optimizer_idx = 0
             loss_G, log = loss_fn(
                 inputs=x, 
@@ -133,6 +133,7 @@ def train_vae(args):
                 cond=None, 
                 split="train"
             )
+            print(log)
             opt_G.zero_grad()
             loss_G.backward()
             opt_G.step()
