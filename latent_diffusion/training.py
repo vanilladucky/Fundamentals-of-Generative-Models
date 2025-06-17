@@ -129,7 +129,7 @@ def train_vae(args):
                 posteriors=posterior, 
                 optimizer_idx=optimizer_idx,
                 global_step=epoch,  # or use a running step counter
-                last_layer=G.decoder[-1],  # pass last layer if using adaptive weight
+                last_layer=G.get_last_layer(),  # pass last layer if using adaptive weight
                 cond=None, 
                 split="train"
             )
