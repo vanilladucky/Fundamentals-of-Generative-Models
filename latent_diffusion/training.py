@@ -11,6 +11,7 @@ from discriminator import NLayerDiscriminator
 from tqdm import tqdm
 import torchvision.utils as vutils
 from torch.distributions import Normal, kl_divergence
+from contperceptual import *
 
 class PerceptualLoss(nn.Module):
     def __init__(self, layers=('3', '8', '15', '22')):
@@ -91,7 +92,16 @@ def train_vae(args):
     G = VAE().to(device)
     D = NLayerDiscriminator().to(device)
     # D = partial_load_model(D, 'day2night.t7')
-    rec_crit = PerceptualLoss().to(device)
+    loss_fn = LPIPSWithDiscriminator(
+        disc_start=0,  # start adversarial loss from the beginning
+        kl_weight=1e-6,
+        perceptual_weight=1.0,
+        pixelloss_weight=1.0,
+        disc_in_channels=3,
+        disc_factor=1.0,
+        disc_weight=1.0,
+        disc_loss="vanilla"
+    ).to(device)
     
     transform = transforms.Compose([
         transforms.Resize((args.image_size, args.image_size)),
@@ -111,16 +121,35 @@ def train_vae(args):
         for x, _ in tqdm(loader, leave=False):
             x = x.to(device)
             recon, posterior = G(x)
-            Lrec  = rec_crit(recon, x)                        
-            Ladv  = generator_adv_loss(D, recon)            
-            Lkl   = kl_regularization(posterior)  
-
-            loss_G = Lrec + Ladv + λ_kl * Lkl
+            
+            optimizer_idx = 0
+            loss_G, log = loss_fn(
+                inputs=x, 
+                reconstructions=recon, 
+                posteriors=posterior, 
+                optimizer_idx=optimizer_idx,
+                global_step=epoch,  # or use a running step counter
+                last_layer=G.decoder[-1],  # pass last layer if using adaptive weight
+                cond=None, 
+                split="train"
+            )
             opt_G.zero_grad()
             loss_G.backward()
             opt_G.step()
 
-            loss_D = discriminator_step(D, x, recon, opt_D)
+            optimizer_idx = 1
+            loss_D, _ = loss_fn(
+                inputs=x, 
+                reconstructions=recon.detach(), 
+                posteriors=posterior, 
+                optimizer_idx=optimizer_idx,
+                global_step=epoch,
+                cond=None, 
+                split="train"
+            )
+            opt_D.zero_grad()
+            loss_D.backward()
+            opt_D.step()
 
         # Sample random latent vectors and decode
         with torch.no_grad():
