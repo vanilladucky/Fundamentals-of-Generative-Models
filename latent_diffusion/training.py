@@ -112,7 +112,7 @@ def train_vae(args):
     )
     ])
 
-    dataset = datasets.ImageFolder(root='./data', transform=transform, download=True)
+    dataset = datasets.ImageFolder(root='./data', transform=transform)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=8, pin_memory=True)
 
     opt_G = torch.optim.AdamW(G.parameters(), lr=1e-4, betas=[0.5, 0.9], weight_decay=1e-5)        
