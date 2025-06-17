@@ -118,6 +118,7 @@ def train_vae(args):
     opt_D = torch.optim.AdamW(D.parameters(), lr=1e-4, betas=[0.5, 0.9], weight_decay=1e-5)
 
     for epoch in range(args.epochs):
+        train_loss = 0
         for x, _ in tqdm(loader, leave=False):
             x = x.to(device)
             recon, posterior = G(x)
@@ -133,7 +134,7 @@ def train_vae(args):
                 cond=None, 
                 split="train"
             )
-            print(log)
+            train_loss+=(log['train/total_loss'].detach().item())
             opt_G.zero_grad()
             loss_G.backward()
             opt_G.step()
@@ -151,6 +152,7 @@ def train_vae(args):
             opt_D.zero_grad()
             loss_D.backward()
             opt_D.step()
+        print(f"Epoch: {epoch+1} -> {train_loss/len(loader):.3f}")
 
         # Sample random latent vectors and decode
         with torch.no_grad():
