@@ -10,7 +10,7 @@ from typing import Tuple, Optional, List
 class VAE(nn.Module):
     def __init__(self,
                  img_ch: int = 3,
-                 enc_init_ch: int = 64,
+                 enc_init_ch: int = 128,
                  ch_mult: Tuple[int] = (1, 2, 4, 4),
                  grnorm_groups: int = 8,
                  resnet_stacks: int = 2,
