@@ -93,13 +93,13 @@ def train_vae(args):
     D = NLayerDiscriminator().to(device)
     # D = partial_load_model(D, 'day2night.t7')
     loss_fn = LPIPSWithDiscriminator(
-        disc_start=5,  # start adversarial loss from the beginning
-        kl_weight=1e-6,
+        disc_start=50001,  
+        kl_weight=0.000001,
         perceptual_weight=1.0,
         pixelloss_weight=1.0,
         disc_in_channels=3,
         disc_factor=1.0,
-        disc_weight=1.0,
+        disc_weight=0.5,
         disc_loss="vanilla"
     ).to(device)
     
@@ -114,8 +114,8 @@ def train_vae(args):
     dataset = datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
-    opt_G = torch.optim.AdamW(G.parameters(), lr=1e-5, weight_decay=1e-5)        
-    opt_D = torch.optim.AdamW(D.parameters(), lr=1e-5, weight_decay=1e-5)
+    opt_G = torch.optim.AdamW(G.parameters(), lr=4.5e-6, weight_decay=1e-5)        
+    opt_D = torch.optim.AdamW(D.parameters(), lr=4.5e-6, weight_decay=1e-5)
 
     for epoch in range(args.epochs):
         train_loss = 0
