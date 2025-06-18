@@ -150,7 +150,7 @@ def train_vae(args):
                 cond=None, 
                 split="train"
             )
-            disc_loss+=(log['train/disc_loss'].detach().item())
+            disc_loss+=(_['train/disc_loss'].detach().item())
             opt_D.zero_grad()
             loss_D.backward()
             opt_D.step()
