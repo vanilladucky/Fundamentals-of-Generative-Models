@@ -114,11 +114,12 @@ def train_vae(args):
     dataset = datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
-    opt_G = torch.optim.AdamW(G.parameters(), lr=4.5e-6, weight_decay=1e-5)        
-    opt_D = torch.optim.AdamW(D.parameters(), lr=4.5e-6, weight_decay=1e-5)
+    opt_G = torch.optim.AdamW(G.parameters(), lr=8e-6) # 4.5e-6
+    opt_D = torch.optim.AdamW(D.parameters(), lr=8e-6)
 
     for epoch in range(args.epochs):
         train_loss = 0
+        disc_loss = 0
         for x, _ in tqdm(loader, leave=False):
             x = x.to(device)
             recon, posterior = G(x)
@@ -149,10 +150,11 @@ def train_vae(args):
                 cond=None, 
                 split="train"
             )
+            disc_loss+=(log['train/disc_loss'].detach().item())
             opt_D.zero_grad()
             loss_D.backward()
             opt_D.step()
-        print(f"Epoch: {epoch+1} -> {train_loss/len(loader):.3f}")
+        print(f"Epoch: {epoch+1} -> {train_loss/len(loader):.3f} & {disc_loss/len(loader):.3f}")
 
         # Sample random latent vectors and decode
         with torch.no_grad():
