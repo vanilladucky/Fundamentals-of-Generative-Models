@@ -93,7 +93,7 @@ def train_vae(args):
     D = NLayerDiscriminator().to(device)
     # D = partial_load_model(D, 'day2night.t7')
     loss_fn = LPIPSWithDiscriminator(
-        disc_start=50001,  
+        disc_start=10,  
         kl_weight=0.000001,
         perceptual_weight=1.0,
         pixelloss_weight=1.0,
