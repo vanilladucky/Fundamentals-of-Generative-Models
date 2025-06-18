@@ -12,6 +12,8 @@ from tqdm import tqdm
 import torchvision.utils as vutils
 from torch.distributions import Normal, kl_divergence
 from contperceptual import *
+from torch import optim
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 class PerceptualLoss(nn.Module):
     def __init__(self, layers=('3', '8', '15', '22')):
@@ -114,7 +116,8 @@ def train_vae(args):
     dataset = datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
-    opt_G = torch.optim.AdamW(G.parameters(), lr=1e-5) # 4.5e-6
+    opt_G = torch.optim.AdamW(G.parameters(), lr=1e-4) # 4.5e-6
+    scheduler = CosineAnnealingLR(opt_G, T_max=30, eta_min=4.5e-6)
     opt_D = torch.optim.AdamW(D.parameters(), lr=4.5e-6)
 
     for epoch in range(args.epochs):
@@ -139,6 +142,7 @@ def train_vae(args):
             opt_G.zero_grad()
             loss_G.backward()
             opt_G.step()
+            scheduler.step()
 
             optimizer_idx = 1
             loss_D, _ = loss_fn(
