@@ -63,3 +63,5 @@ This repository is updated periodically. If you have suggestions for additional 
 
 * [Reverse diffusions, Score & Tweedie](https://alexxthiery.github.io/notes/reverse_and_tweedie/reverse_and_tweedie.html)  
 * [CS492(D) Diffusion Models and Their Applications (KAIST, Fall 2024)](https://mhsung.github.io/kaist-cs492d-fall-2024/)
+* [Linear Differential Equations](https://ocw.mit.edu/courses/res-18-009-learn-differential-equations-up-close-with-gilbert-strang-and-cleve-moler-fall-2015/)
+* [Monte Carlo Markov Chain](https://arxiv.org/abs/1909.12313)
