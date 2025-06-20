@@ -95,7 +95,7 @@ def train_vae(args):
     D = NLayerDiscriminator().to(device)
     # D = partial_load_model(D, 'day2night.t7')
     loss_fn = LPIPSWithDiscriminator(
-        disc_start=200,  
+        disc_start=500,  
         kl_weight=0.000001,
         perceptual_weight=1.0,
         pixelloss_weight=1.0,
@@ -116,9 +116,9 @@ def train_vae(args):
     dataset = datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
-    opt_G = torch.optim.AdamW(G.parameters(), lr=1e-3) # 4.5e-6
-    scheduler = CosineAnnealingLR(opt_G, T_max=200, eta_min=4.5e-6)
-    opt_D = torch.optim.AdamW(D.parameters(), lr=1e-6)
+    opt_G = torch.optim.AdamW(G.parameters(), lr=8e-3) # 4.5e-6
+    scheduler = CosineAnnealingLR(opt_G, T_max=500, eta_min=4.5e-6)
+    opt_D = torch.optim.AdamW(D.parameters(), lr=4.5e-6)
 
     for epoch in range(args.epochs):
         train_loss = 0
