@@ -118,7 +118,7 @@ def train_vae(args):
 
     opt_G = torch.optim.AdamW(G.parameters(), lr=8e-3) # 4.5e-6
     scheduler = CosineAnnealingLR(opt_G, T_max=500, eta_min=4.5e-6)
-    opt_D = torch.optim.AdamW(D.parameters(), lr=4.5e-6)
+    opt_D = torch.optim.AdamW(D.parameters(), lr=4.5e-7)
 
     for epoch in range(args.epochs):
         train_loss = 0
