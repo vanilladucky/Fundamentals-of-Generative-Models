@@ -116,7 +116,7 @@ def train_vae(args):
     dataset = datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
-    opt_G = torch.optim.AdamW(G.parameters(), lr=1e-4) # 4.5e-6
+    opt_G = torch.optim.AdamW(G.parameters(), lr=1e-3) # 4.5e-6
     scheduler = CosineAnnealingLR(opt_G, T_max=500, eta_min=4.5e-6)
     opt_D = torch.optim.AdamW(D.parameters(), lr=4.5e-7)
 
