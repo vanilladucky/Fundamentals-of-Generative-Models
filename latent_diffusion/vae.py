@@ -14,7 +14,7 @@ class VAE(nn.Module):
                  ch_mult: Tuple[int] = (1, 2, 4, 4),
                  grnorm_groups: int = 8,
                  resnet_stacks: int = 3,
-                 latent_dim: int = 4,
+                 latent_dim: int = 16,
                  embed_dim = None,
                  down_mode: str = 'avg',
                  down_kern: int = 2,
