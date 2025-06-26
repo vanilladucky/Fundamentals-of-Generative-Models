@@ -163,7 +163,9 @@ def train_vae(args):
         # Sample random latent vectors and decode
         with torch.no_grad():
             z = torch.randn(4, args.latent_dim, int((args.latent_dim)**2),int((args.latent_dim)**2)).to(device)
+            G.eval()
             sampled_imgs = G.decode(z) 
+            G.train()
 
         if (epoch+1) > 0 and (epoch+1) % 10 == 0:
             # Save the generated samples
