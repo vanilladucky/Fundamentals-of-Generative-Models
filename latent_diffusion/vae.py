@@ -88,7 +88,6 @@ class VAE(nn.Module):
             z = posterior.sample()
         else:
             z = posterior.mode()
-        print(f"Encoded shape after sampling: {z.shape}")
         dec = self.decode(z)
         return dec, posterior
 
