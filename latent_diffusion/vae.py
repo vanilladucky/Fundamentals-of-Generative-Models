@@ -84,10 +84,12 @@ class VAE(nn.Module):
 
     def forward(self, x, sample_posterior=True):
         posterior = self._encode(x)
+        print(f"Encoded shape before sampling: {z.shape}")
         if sample_posterior:
             z = posterior.sample()
         else:
             z = posterior.mode()
+        print(f"Encoded shape after sampling: {z.shape}")
         dec = self.decode(z)
         return dec, posterior
 
